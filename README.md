@@ -1,0 +1,35 @@
+# Foamy Notification Center
+
+Notification history with app stacks, search, and do not disturb.
+
+![Foamy Notification Center with sample notifications](screenshot.png)
+
+## Install
+
+Requires Omarchy Quattro with stock notifications enabled, `jq`, and
+`inotify-tools`.
+
+```sh
+omarchy plugin add https://github.com/foamrider/foamy-notification-center.git --enable
+```
+
+## Use
+
+- Click the bell to open the center. Click an app heading to expand its stack.
+- Hover to dismiss a stack or individual notification. The trash clears the panel.
+- Click search or press `/` to filter. Press Escape to close search.
+- Click the silence button, or right-click the bar icon, to toggle do not disturb.
+
+Set `language` on the widget entry in `shell.json`: `system` (default), `en`,
+or `nb`. Other system languages fall back to English.
+
+Keeps up to 1,000 notifications for 30 days by default. Silenced notifications
+remain in history; stock Omarchy exceptions still apply.
+
+## License
+
+[MIT](LICENSE). Based on [Omarchy Notification Center](https://github.com/jankeesvw/omarchy-notification-center).
+Omarchy and Lucide notices are in [LICENSE-OMARCHY](LICENSE-OMARCHY) and
+[LICENSE-LUCIDE](LICENSE-LUCIDE).
+
+Provided **as is**, without warranty or guaranteed support. Use at your own risk.
