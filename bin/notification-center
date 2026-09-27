@@ -51,6 +51,7 @@ max_items=${NC_MAX_ITEMS:-1000}
 # setting for anyone who would rather the archive held words only, and it means
 # no copy is made rather than a copy that goes unshown.
 previews=${NC_PREVIEWS:-1}
+preview_policy_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 
 die() {
   printf '{"ok":false,"error":%s}\n' "$(printf '%s' "$1" | jq -Rs .)"
@@ -128,7 +129,7 @@ is_path() {
 # to the copy. The originals live and die with the ten files the service keeps,
 # so an entry that still pointed at one would lose its face within the hour.
 copy_image() {
-  local src=$1 key=$2 slot=$3 dest
+  local src=$1 key=$2 slot=$3 dest mime coder
   src=${src#file://}
   [[ -f $src ]] || { printf '%s' ""; return; }
   dest="$images/$key-$slot"
@@ -139,7 +140,7 @@ copy_image() {
     # Only actual images are kept. These paths arrive on the notification,
     # which is to say from whoever sent it, and an icon "at" ~/.ssh/id_rsa
     # should not quietly become a second copy of it in here.
-    if command -v file >/dev/null 2>&1; then
+    if [[ $slot != preview ]] && command -v file >/dev/null 2>&1; then
       case "$(file -bL --mime-type -- "$dest.tmp" 2>/dev/null)" in
         image/*) ;;
         *) rm -f -- "$dest.tmp"; printf '%s' ""; return ;;
@@ -149,10 +150,23 @@ copy_image() {
     # camera took it at. A month of motion alerts at 175kB each is a store
     # nobody asked for; at panel width they are a fifth of that, and the
     # original is still where it always was.
-    if [[ $slot == preview ]] && command -v magick >/dev/null 2>&1; then
-      magick "$dest.tmp" -auto-orient -resize '720x720>' -quality 82 "$dest.resized" 2>/dev/null \
-        && mv -f -- "$dest.resized" "$dest.tmp"
-      rm -f -- "$dest.resized"
+    if [[ $slot == preview ]]; then
+      # Extension and compressed size do not bound decoding. Require a known
+      # raster decoder, and never retain the original when conversion fails.
+      mime=$(timeout -k 1 2 file -bL --mime-type -- "$dest.tmp" 2>/dev/null) || mime=""
+      case $mime in
+        image/png) coder=PNG ;;
+        image/jpeg) coder=JPEG ;;
+        image/gif) coder=GIF ;;
+        image/webp) coder=WEBP ;;
+        *) coder="" ;;
+      esac
+      if [[ -z $coder ]] || ! resize_preview "$coder" "$dest.tmp" "$dest.resized" ||
+         ! mv -f -- "$dest.resized" "$dest.tmp"; then
+        printf '%s\n' 'notification-center: preview_rejected: unsupported image, decoder unavailable, or conversion limit reached; keeping notification text' >&2
+        rm -f -- "$dest.tmp" "$dest.resized"
+        return
+      fi
     fi
     mv -f -- "$dest.tmp" "$dest"
     printf 'file://%s' "$dest"
@@ -161,6 +175,19 @@ copy_image() {
     printf '%s' ""
   fi
 }
+
+resize_preview() (
+  local coder=$1 src=$2 dest=$3
+  command -v magick >/dev/null 2>&1 || return 1
+  [[ -r $preview_policy_dir/policy.xml ]] || return 1
+  # OS limits also cover decoder allocations outside ImageMagick's pixel cache.
+  # The external deadline kills stuck decoders while the archive lock is held.
+  ulimit -c 0 -v 524288 -f 10240 || return 1
+  MAGICK_CONFIGURE_PATH="$preview_policy_dir" timeout -k 1 5 \
+    magick "$coder:${src}[0]" -auto-orient -resize '720x720>' -strip \
+    "PNG:$dest" 2>/dev/null || return 1
+  [[ -s $dest ]] && (( $(stat -c%s -- "$dest" 2>/dev/null || echo 5242881) <= 5242880 ))
+)
 
 # The picture a notification is about, as opposed to the icon of whatever sent
 # it. Apps that photograph something (a camera catching movement, a screenshot

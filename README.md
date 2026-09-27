@@ -9,6 +9,14 @@ Notification history with app stacks, search, and do not disturb.
 Requires Omarchy Quattro with stock notifications enabled, `jq`, and
 `inotify-tools`.
 
+Picture previews also require `file` and ImageMagick 7 (`magick`). PNG, JPEG,
+GIF, and WebP previews are converted to a single PNG of at most 720 × 720 pixels.
+Conversion uses a plugin-local policy: no delegates or disk pixel cache, an
+8,192-pixel width/height limit, a 128 MiB pixel cache, a 512 MiB process memory
+limit, and a five-second timeout (forced termination after one further second).
+Unsupported, oversized, or failed previews are discarded; notification text is
+still archived. Missing preview tools also leave notifications without previews.
+
 ```sh
 omarchy plugin add https://github.com/foamrider/foamy-notification-center.git --enable
 ```
