@@ -2,7 +2,7 @@
 
 Notification history with app stacks, search, and do not disturb.
 
-![Foamy Notification Center with sample notifications](screenshot.png)
+![Foamy Notification Center with sample notifications](preview.png)
 
 ## Install
 
@@ -25,6 +25,22 @@ or `nb`. Other system languages fall back to English.
 
 Keeps up to 1,000 notifications for 30 days by default. Silenced notifications
 remain in history; stock Omarchy exceptions still apply.
+
+## Remove
+
+```sh
+omarchy plugin remove foamy.notification-center
+```
+
+Removing the plugin leaves stock notifications running. Notification history,
+saved images, and the current do-not-disturb setting remain on disk. The plugin's
+archive and images are under `$XDG_STATE_HOME/omarchy-notification-center`
+(default `~/.local/state/omarchy-notification-center`). Stock notification files
+under `$XDG_STATE_HOME/omarchy/notifications` are also retained. Review these
+directories separately if you want to delete history.
+
+Omarchy manages the plugin entry in `shell.json`. Packages and data outside
+the plugin directory are retained unless you remove them separately.
 
 ## License
 
