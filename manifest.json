@@ -76,7 +76,7 @@
           "Nothing"
         ],
         "defaultValue": "Auto",
-        "description": "Auto opens the picture a notification pointed at, a camera frame or a screenshot, and otherwise focuses the app that sent it. It never runs the command the notification arrived with: that command is chosen by whoever sent the notification, and a stored one is an attacker's command waiting for a click. Focus the app skips the file as well, and Nothing makes the list read-only."
+        "description": "Auto runs the saved action, such as opening a URL, using the same execution policy as the toast. Without a valid saved action, it opens the notification's picture or focuses the sending app. App-owned callbacks cannot be replayed from history. Focus the app skips actions and pictures; Nothing disables body clicks."
       },
       {
         "key": "showBody",

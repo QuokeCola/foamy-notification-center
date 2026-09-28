@@ -1,5 +1,23 @@
 var CRITICAL_URGENCY = 2
 
+// Match the stock toast's execArgv validation. Arguments stay data; legacy
+// shell-command strings are not converted into executable actions.
+function parseExecArgv(value) {
+  if (typeof value !== "string" || !value) return null
+  var argv
+  try {
+    argv = JSON.parse(value)
+  } catch (e) {
+    return null
+  }
+  if (!Array.isArray(argv) || argv.length === 0) return null
+  for (var i = 0; i < argv.length; i++) {
+    if (typeof argv[i] !== "string") return null
+  }
+  if (!argv[0] || argv[0].charAt(0) === "-") return null
+  return argv
+}
+
 function unreadState(entries, lastSeen) {
   var rows = Array.isArray(entries) ? entries : []
   var boundary = Number(lastSeen)
@@ -87,6 +105,7 @@ function stackRows(entries, expanded, filter) {
 
 if (typeof module !== "undefined") {
   module.exports = {
+    parseExecArgv: parseExecArgv,
     CRITICAL_URGENCY: CRITICAL_URGENCY,
     unreadState: unreadState,
     relativeTime: relativeTime,

@@ -202,18 +202,17 @@ Panel {
 
   // --------------------------------------------------------------- activating
 
-  // What a click on an old notification should do.
-  //
-  // Not what the notification asked for. A notification arrives carrying a
-  // shell command, chosen by whoever sent it, and anything on this machine can
-  // send one. Keeping that command and running it later is an attacker's
-  // command waiting for a click, which is worth nothing next to the one thing
-  // people actually want back: the picture. So what the store keeps is at most
-  // an absolute path to an image, and that is opened by argument rather than
-  // through a shell, so a hostile path is a file that fails to open instead of
-  // a command that runs.
   function activate(row) {
     if (!row || clickAction === "Nothing") return
+    // Use the toast's execution helper so saved actions behave the same after
+    // archiving. App-owned callbacks are not present in the saved data.
+    var argv = clickAction === "Auto" ? Model.parseExecArgv(row.execArgv) : null
+    if (argv) {
+      Util.execArgv(argv)
+      root.remove(row.key)
+      root.close()
+      return
+    }
     if (clickAction === "Auto" && String(row.file || "") !== "") {
       Quickshell.execDetached(["xdg-open", row.file])
       root.remove(row.key)

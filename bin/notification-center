@@ -283,9 +283,8 @@ ingest_file() {
   is_path "$app_icon" && icon_copy=$(copy_image "$app_icon" "$key" "appIcon")
   is_path "$image_src" && image_copy=$(copy_image "$image_src" "$key" "image")
 
-  # The path the action pointed at, if it pointed at an image. This is what a
-  # click opens; the command it came out of is discarded here and never
-  # reaches the archive.
+  # Keep image previews separate from the saved action. Only execArgv is
+  # replayable; legacy exec strings remain usable for preview extraction only.
   file_src=$(preview_source "$exec_src")
   file_src=${file_src#file://}
 
@@ -309,6 +308,8 @@ ingest_file() {
        image: $image,
        preview: $preview,
        file: $file,
+       execArgv: (if (.execArgv | type) == "array" then (.execArgv | tojson)
+                  elif (.execArgv | type) == "string" then .execArgv else "" end),
        glyph: (.glyph // ""),
        urgency: (.urgency // 1),
        timestamp: (.timestamp // 0)
@@ -623,8 +624,8 @@ seed_entries() {
 #
 # The first is the important one: an archive written by an older version still
 # holds `exec`, the sender-chosen shell command the notification arrived with.
-# Those are stripped, and the image path is lifted out of them first, so
-# nothing is lost except the ability to run a stranger's command.
+# Strip legacy shell strings after extracting their image paths. Structured
+# execArgv actions are preserved without being evaluated by this command.
 #
 # The second is the ordinary one: entries that never had a picture get one now
 # if the file they name is still on disk.
