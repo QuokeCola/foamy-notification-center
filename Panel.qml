@@ -204,16 +204,8 @@ Panel {
 
   function activate(row) {
     if (!row || clickAction === "Nothing") return
-    // Use the toast's execution helper so saved actions behave the same after
-    // archiving. App-owned callbacks are not present in the saved data.
-    var argv = clickAction === "Auto" ? Model.parseExecArgv(row.execArgv) : null
-    if (argv) {
-      Util.execArgv(argv)
-      root.remove(row.key)
-      root.close()
-      return
-    }
-    if (clickAction === "Auto" && String(row.file || "") !== "") {
+    // Ignore sender commands even before an old archive has been migrated.
+    if (clickAction === "Auto" && Model.isPreviewFile(row.file)) {
       Quickshell.execDetached(["xdg-open", row.file])
       root.remove(row.key)
       root.close()

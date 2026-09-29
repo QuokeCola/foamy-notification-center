@@ -24,9 +24,8 @@ omarchy plugin add https://github.com/foamrider/foamy-notification-center.git --
 ## Use
 
 - Click the bell to open the center. Click an app heading to expand its stack.
-- Click a notification body to run its saved action, including the visible card
-  in a collapsed stack. Without a valid saved action, it opens the notification's
-  picture or focuses the sending app.
+- Click a notification body to open its picture or focus the sending app,
+  including the visible card in a collapsed stack.
 - Hover to dismiss a stack or individual notification. The trash clears the panel.
 - Click search or press `/` to filter. Press Escape to close search.
 - Click the silence button, or right-click the bar icon, to toggle do not disturb.
@@ -37,12 +36,12 @@ or `nb`. Other system languages fall back to English.
 Keeps up to 1,000 notifications for 30 days by default. Silenced notifications
 remain in history; stock Omarchy exceptions still apply.
 
-The default `clickAction: "Auto"` replays Omarchy's saved `execArgv` actions
-with the same execution policy as the toast. App-owned callbacks, including
-URLs opened internally by an app, cannot be replayed from history. Older entries
-whose actions were already discarded keep the picture/app-focus fallback.
-Set `clickAction` to `"Focus the app"` to skip actions and pictures, or `"Nothing"`
-to disable notification body clicks. Legacy `exec` shell strings are never run.
+The default `clickAction: "Auto"` opens only an absolute PNG, JPEG, GIF, or WebP
+path extracted from the notification action; otherwise it focuses the sending
+app. Sender commands (`exec` and `execArgv`) are never replayed or kept in the
+archive. Existing archived commands are removed on the next sync.
+Set `clickAction` to `"Focus the app"` to skip pictures, or `"Nothing"` to disable
+notification body clicks. App callbacks and URL actions cannot be replayed.
 
 ## Remove
 

@@ -283,8 +283,7 @@ ingest_file() {
   is_path "$app_icon" && icon_copy=$(copy_image "$app_icon" "$key" "appIcon")
   is_path "$image_src" && image_copy=$(copy_image "$image_src" "$key" "image")
 
-  # Keep image previews separate from the saved action. Only execArgv is
-  # replayable; legacy exec strings remain usable for preview extraction only.
+  # Extract only an image path. Neither command representation is persisted.
   file_src=$(preview_source "$exec_src")
   file_src=${file_src#file://}
 
@@ -308,8 +307,6 @@ ingest_file() {
        image: $image,
        preview: $preview,
        file: $file,
-       execArgv: (if (.execArgv | type) == "array" then (.execArgv | tojson)
-                  elif (.execArgv | type) == "string" then .execArgv else "" end),
        glyph: (.glyph // ""),
        urgency: (.urgency // 1),
        timestamp: (.timestamp // 0)
@@ -444,7 +441,7 @@ cmd_sync() {
 # it is not something to leave until somebody thinks to run a migration: every
 # sync clears it, and once cleared the grep costs nothing.
 disarm_archive() {
-  grep -q '"exec":' "$archive" 2>/dev/null || return 0
+  grep -qE '"(exec|execArgv)"[[:space:]]*:' "$archive" 2>/dev/null || return 0
   backfill_previews >/dev/null
 }
 
@@ -623,9 +620,8 @@ seed_entries() {
 # Two jobs over the existing archive, both idempotent, both safe to run twice.
 #
 # The first is the important one: an archive written by an older version still
-# holds `exec`, the sender-chosen shell command the notification arrived with.
-# Strip legacy shell strings after extracting their image paths. Structured
-# execArgv actions are preserved without being evaluated by this command.
+# holds `exec` or `execArgv`, the sender-chosen command it arrived with.
+# Strip both after extracting only an image path, without evaluating commands.
 #
 # The second is the ordinary one: entries that never had a picture get one now
 # if the file they name is still on disk.
@@ -635,14 +631,16 @@ backfill_previews() {
   while IFS= read -r line; do
     [[ -n $line ]] || continue
     key=$(printf '%s' "$line" | jq -r '.key // ""')
-    [[ -n $key ]] || { printf '%s\n' "$line" >> "$tmp"; continue; }
+    [[ -n $key ]] || { printf '%s' "$line" | jq -c 'del(.exec, .execArgv)' >> "$tmp"; continue; }
 
     file_src=$(printf '%s' "$line" | jq -r '.file // ""')
+    # Existing file fields must pass the same whole-path allowlist as new ones.
+    file_src=$(preview_source "$(jq -cn --arg file "$file_src" '[$file]')")
     if [[ -z $file_src ]]; then
-      exec_src=$(printf '%s' "$line" | jq -r '.exec // ""')
+      exec_src=$(printf '%s' "$line" | jq -r '.execArgv // .exec // ""')
       file_src=$(preview_source "$exec_src")
-      file_src=${file_src#file://}
     fi
+    file_src=${file_src#file://}
 
     preview_copy=$(printf '%s' "$line" | jq -r '.preview // ""')
     if [[ -z $preview_copy && -n $file_src ]] && (( previews )); then
@@ -653,7 +651,7 @@ backfill_previews() {
     printf '%s' "$line" | jq -c \
       --arg file "$file_src" \
       --arg preview "$preview_copy" \
-      'del(.exec) + {file: $file, preview: $preview}' >> "$tmp"
+      'del(.exec, .execArgv) + {file: $file, preview: $preview}' >> "$tmp"
   done < "$archive"
   mv -f "$tmp" "$archive"
   printf '%s' "$filled"

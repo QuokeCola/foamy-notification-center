@@ -76,7 +76,7 @@
           "Nothing"
         ],
         "defaultValue": "Auto",
-        "description": "Auto runs the saved action, such as opening a URL, using the same execution policy as the toast. Without a valid saved action, it opens the notification's picture or focuses the sending app. App-owned callbacks cannot be replayed from history. Focus the app skips actions and pictures; Nothing disables body clicks."
+        "description": "Auto opens the picture a notification pointed at, using only an absolute PNG, JPEG, GIF, or WebP path, and otherwise focuses the sending app. Sender commands and URL actions are never replayed from history. Focus the app skips pictures; Nothing disables body clicks."
       },
       {
         "key": "showBody",

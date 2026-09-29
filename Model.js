@@ -1,21 +1,10 @@
 var CRITICAL_URGENCY = 2
 
-// Match the stock toast's execArgv validation. Arguments stay data; legacy
-// shell-command strings are not converted into executable actions.
-function parseExecArgv(value) {
-  if (typeof value !== "string" || !value) return null
-  var argv
-  try {
-    argv = JSON.parse(value)
-  } catch (e) {
-    return null
-  }
-  if (!Array.isArray(argv) || argv.length === 0) return null
-  for (var i = 0; i < argv.length; i++) {
-    if (typeof argv[i] !== "string") return null
-  }
-  if (!argv[0] || argv[0].charAt(0) === "-") return null
-  return argv
+// Recheck persisted paths at the click boundary, including unmigrated entries.
+// Archived sender commands are never executable actions.
+function isPreviewFile(value) {
+  return typeof value === "string"
+    && /^\/[^"'\x00-\x1f\x7f]*\.(jpe?g|png|webp|gif)$/i.test(value)
 }
 
 function unreadState(entries, lastSeen) {
@@ -105,7 +94,7 @@ function stackRows(entries, expanded, filter) {
 
 if (typeof module !== "undefined") {
   module.exports = {
-    parseExecArgv: parseExecArgv,
+    isPreviewFile: isPreviewFile,
     CRITICAL_URGENCY: CRITICAL_URGENCY,
     unreadState: unreadState,
     relativeTime: relativeTime,
