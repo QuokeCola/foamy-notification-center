@@ -242,64 +242,94 @@ preview_source() {
 # by key. The catch-up sync passes 0 instead, or starting the shell would
 # replay the whole archive at both of them.
 ingest_file() {
+  local LC_ALL=C
   local file=$1 announce_existing=${2:-0}
-  local key entry app_icon image_src exec_src icon_copy image_copy file_src preview_copy
+  local key entry app_icon image_src exec_src icon_copy image_copy file_src preview_copy existing source_hash assets_hash sources_hash source_json asset
   key=$(basename -- "$file"); key=${key%.json}
-  [[ -n $key ]] || return 0
+  [[ $key =~ ^[0-9]+-[0-9]+$ ]] || return 0
   if is_dismissed "$key"; then
     return 0
   fi
-  if have_key "$key"; then
-    (( announce_existing )) && grep -F "\"key\":\"$key\"" "$archive" | head -n 1
-    return 0
-  fi
   [[ -s $file ]] || return 0
+  # Capture one bounded version: the daemon atomically replaces this path during updates.
+  source_json=$(head -c 131073 -- "$file") || return 1
+  (( ${#source_json} <= 131072 )) || return 0
 
   # A file caught mid-write parses as nothing; it will be caught again on the
   # move into history, or by the next sync.
-  jq -e . "$file" >/dev/null 2>&1 || return 0
+  jq -e . <<< "$source_json" >/dev/null 2>&1 || return 0
 
   # Transient action feedback remains a toast and does not enter this archive.
-  jq -e '.transient == true' "$file" >/dev/null 2>&1 && return 0
+  jq -e '.transient == true' <<< "$source_json" >/dev/null 2>&1 && return 0
 
   if [[ -s $cleared_at_file ]]; then
     local cleared_at file_stamp
     cleared_at=$(cat "$cleared_at_file" 2>/dev/null || echo 0)
     if [[ $cleared_at =~ ^[0-9]+$ ]] && (( cleared_at > 0 )); then
-      file_stamp=$(jq -r '(.timestamp // 0) | tonumber?' "$file" 2>/dev/null || echo 0)
+      file_stamp=$(jq -r '(.timestamp // 0) | tonumber?' <<< "$source_json" 2>/dev/null || echo 0)
       if [[ $file_stamp =~ ^[0-9]+$ ]] && (( file_stamp > 0 && file_stamp <= cleared_at )); then
         return 0
       fi
     fi
   fi
 
-  app_icon=$(jq -r '.appIcon // ""' "$file")
-  image_src=$(jq -r '.image // ""' "$file")
+  app_icon=$(jq -r '.appIcon // ""' <<< "$source_json")
+  image_src=$(jq -r '.image // ""' <<< "$source_json")
   # execArgv is what the service writes now; exec is what it wrote before.
-  exec_src=$(jq -r '.execArgv // .exec // ""' "$file")
+  exec_src=$(jq -r '.execArgv // .exec // ""' <<< "$source_json")
 
-  icon_copy=$app_icon
-  image_copy=$image_src
-  is_path "$app_icon" && icon_copy=$(copy_image "$app_icon" "$key" "appIcon")
-  is_path "$image_src" && image_copy=$(copy_image "$image_src" "$key" "image")
-
-  # Extract only an image path. Neither command representation is persisted.
   file_src=$(preview_source "$exec_src")
   file_src=${file_src#file://}
-
-  preview_copy=""
-  if (( previews )) && [[ -n $file_src ]]; then
-    preview_copy=$(copy_image "$file_src" "$key" "preview")
+  existing=$(grep -F "\"key\":\"$key\"" "$archive" | head -n 1)
+  source_hash=$(printf '%s' "$source_json" | sha256sum); source_hash=${source_hash%% *}
+  sources_hash=$(printf '%s\n' "$app_icon" "$image_src" "$file_src" "$previews" | sha256sum); sources_hash=${sources_hash%% *}
+  # Reuse retained images on text-only updates, but invalidate when source files change.
+  assets_hash=$({
+    printf '%s\n' "$app_icon" "$image_src" "$file_src" "$previews"
+    for asset in "$app_icon" "$image_src" "$file_src"; do
+      is_path "$asset" && stat -Lc '%d:%i:%s:%y:%z' -- "${asset#file://}" 2>/dev/null
+    done
+  } | sha256sum); assets_hash=${assets_hash%% *}
+  if [[ -n $existing ]] && [[ $(jq -r '.sourceHash // ""' <<< "$existing") == "$source_hash" ]] &&
+     [[ $(jq -r '.assetsHash // ""' <<< "$existing") == "$assets_hash" ]]; then
+    return 0
+  fi
+  if [[ -n $existing ]] && [[ $(jq -r '.assetsHash // ""' <<< "$existing") == "$assets_hash" ]]; then
+    icon_copy=$(jq -r '.appIcon // ""' <<< "$existing")
+    image_copy=$(jq -r '.image // ""' <<< "$existing")
+    preview_copy=$(jq -r '.preview // ""' <<< "$existing")
+  else
+    icon_copy=$app_icon
+    image_copy=$image_src
+    is_path "$app_icon" && icon_copy=$(copy_image "$app_icon" "$key" "appIcon")
+    is_path "$image_src" && image_copy=$(copy_image "$image_src" "$key" "image")
+    preview_copy=""
+    if (( previews )) && [[ -n $file_src ]]; then
+      preview_copy=$(copy_image "$file_src" "$key" "preview")
+    fi
+    # Sender cleanup is not an image change: keep retained copies when the same original disappears.
+    if [[ -n $existing ]] && [[ $(jq -r '.assetSources // ""' <<< "$existing") == "$sources_hash" ]]; then
+      if is_path "$app_icon" && [[ ! -e ${app_icon#file://} ]]; then icon_copy=$(jq -r '.appIcon // ""' <<< "$existing"); fi
+      if is_path "$image_src" && [[ ! -e ${image_src#file://} ]]; then image_copy=$(jq -r '.image // ""' <<< "$existing"); fi
+      if [[ -n $file_src && ! -e $file_src ]]; then preview_copy=$(jq -r '.preview // ""' <<< "$existing"); fi
+    fi
   fi
 
   entry=$(jq -c \
     --arg key "$key" \
+    --arg sourceHash "$source_hash" \
+    --arg assetsHash "$assets_hash" \
+    --arg assetSources "$sources_hash" \
     --arg appIcon "$icon_copy" \
     --arg image "$image_copy" \
     --arg preview "$preview_copy" \
     --arg file "$file_src" \
     '{
        key: $key,
+       sourceHash: $sourceHash,
+       assetsHash: $assetsHash,
+       assetSources: $assetSources,
+       desktopEntry: (.desktopEntry // ""),
        app: (.app // ""),
        appIcon: $appIcon,
        summary: (.summary // ""),
@@ -313,10 +343,22 @@ ingest_file() {
      }
      | .timestamp = (if .timestamp > 0 then .timestamp
                      else ((.key | split("-")[0] | tonumber?) // 0) end)' \
-    "$file" 2>/dev/null) || return 0
+    <<< "$source_json" 2>/dev/null) || return 0
   [[ -n $entry ]] || return 0
 
-  printf '%s\n' "$entry" >> "$archive"
+  if [[ -n $existing ]]; then
+    # Replace in place: a progress update is the same unread notification, not a new arrival.
+    # Notification text stays in a private file, never in process arguments.
+    printf '%s\n' "$entry" > "$archive.entry" || return 1
+    jq -Rc --arg key "$key" --slurpfile replacement "$archive.entry" 'fromjson? | if .key == $key then $replacement[0] else . end' "$archive" > "$archive.tmp"
+    local result=$?
+    rm -f -- "$archive.entry"
+    (( result == 0 )) || return 1
+    mv -f "$archive.tmp" "$archive" || return 1
+  else
+    printf '%s\n' "$entry" >> "$archive"
+  fi
+  ingest_changed=1
   printf '%s\n' "$entry"
 }
 
@@ -448,34 +490,40 @@ disarm_archive() {
 cmd_watch() {
   ensure_store
   mkdir -p "$src_dir" "$src_history"
-  # Catch up first: the shell has been down, or this is the first run, and
-  # whatever arrived in the meantime is still lying in those directories.
-  cmd_sync
-
   command -v inotifywait >/dev/null 2>&1 || die "inotifywait is not installed"
-
-  # close_write catches a popup being written, moved_to catches it being
-  # archived. The same notification arrives twice that way and the second one
-  # is dropped by the key check, which is cheaper than trying to be clever
-  # about which of the two events to listen for.
-  # Read through a descriptor rather than a pipeline, so the watcher has a pid
-  # this script can kill. Piped into a `while` loop it would be orphaned every
-  # time the shell reloads its plugins, and a day of reloads is a day of stray
-  # inotifywait processes.
-  exec 3< <(inotifywait -m -q -e close_write -e moved_to --format '%w%f' \
-    "$src_dir" "$src_history" 2>/dev/null)
+  # Establish watches before startup reconciliation so arrivals cannot fall into a gap.
+  exec 3< <(LC_ALL=C inotifywait -m -e close_write -e moved_to -e delete --format '%e|%w%f' \
+    "$src_dir" "$src_history" "$store" 2>&1)
   watcher=$!
-  trap 'kill "$watcher" 2>/dev/null' EXIT INT TERM
-
-  while IFS= read -r file <&3; do
-    [[ $file == *.json ]] || continue
-    with_lock ingest_one "$file"
+  trap 'kill "$watcher" 2>/dev/null || true' EXIT INT TERM
+  local event file ready=0
+  while IFS= read -r event <&3; do
+    if [[ $event == 'Watches established.' ]]; then ready=1; break; fi
   done
+  (( ready )) || die "notification watcher failed to start"
+  cmd_sync
+  printf '%s\n' '{"event":"storeChanged"}'
+  while IFS='|' read -r event file <&3; do
+    if [[ $event == *Q_OVERFLOW* ]]; then
+      cmd_sync
+      printf '%s\n' '{"event":"storeChanged"}'
+    elif [[ $file == "$store/archive.jsonl" || $file == "$cleared_at_file" || $file == "$dismissed_file" ]]; then
+      printf '%s\n' '{"event":"storeChanged"}'
+    elif [[ $file == "$seen_file" ]]; then
+      printf '%s\n' '{"event":"seenChanged"}'
+    elif [[ $file == "$src_dir/"*.json || $file == "$src_history/"*.json ]]; then
+      [[ $event == *DELETE* ]] || with_lock ingest_one "$file" || die "cannot update notification archive"
+    fi
+  done
+  die "notification watcher stopped"
 }
 
 ingest_one() {
-  ingest_file "$1" 1
-  prune
+  ingest_changed=0
+  ingest_file "$1" 1 || return $?
+  # Duplicate filesystem events and archival moves do not need a retention rewrite.
+  (( ingest_changed )) && prune
+  return 0
 }
 
 cmd_list() {

@@ -34,6 +34,11 @@ Item {
   property var removedKeys: ({})
   property double lastSeen: 0
   property bool loaded: false
+  property bool loadPending: false
+  property string loadError: ""
+  property int archiveRevision: 0
+  property int listRevision: 0
+  property int listLoadCount: 0
   property string removalError: ""
   property var pendingRemovalKeys: []
   property var activeRemovalKeys: []
@@ -53,6 +58,45 @@ Item {
     "NC_PREVIEWS": root.showPreview ? "1" : "0"
   })
 
+  readonly property string foamyDirectory: (Quickshell.env("XDG_CONFIG_HOME") || Quickshell.env("HOME") + "/.config") + "/omarchy/plugins/foamy.notifications"
+  property bool foamyFocusAvailable: false
+  property string focusError: ""
+  property var focusEntry: null
+  signal focusCompleted()
+  FileView {
+    path: root.foamyDirectory + "/manifest.json"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: {
+      try { root.foamyFocusAvailable = JSON.parse(text()).id === "foamy.notifications" }
+      catch (e) { root.foamyFocusAvailable = false }
+    }
+    onLoadFailed: root.foamyFocusAvailable = false
+  }
+  function focusNotification(row) {
+    if (focusProc.running || !row || !/^[0-9]+-[0-9]+$/.test(String(row.key))) return
+    focusError = ""
+    focusEntry = row
+    focusProc.stdinEnabled = true
+    focusProc.running = true
+  }
+  Process {
+    id: focusProc
+    command: ["python3", root.foamyDirectory + "/bin/notification-helper.py", "focus-configured"]
+    stdinEnabled: true
+    onStarted: {
+      write(JSON.stringify({app:root.focusEntry.app,desktopEntry:root.focusEntry.desktopEntry || "",body:root.focusEntry.body || ""}))
+      stdinEnabled = false
+    }
+    stderr: StdioCollector { id: focusErrors }
+    onExited: function(exitCode, exitStatus) {
+      if (exitCode === 0 && exitStatus === 0) { root.remove(root.focusEntry.key); root.focusCompleted() }
+      else { root.focusError = "Could not identify the window. Check browserMappings and try again."; console.warn("Notification focus failed:", focusErrors.text) }
+      root.focusEntry = null
+    }
+  }
+
   signal entryAdded(var entry)
   signal entriesReset()
 
@@ -61,13 +105,14 @@ Item {
   }
 
   function differsFrom(data) {
-    if (data.length !== entries.length) return true
-    if (data.length === 0) return false
-    return String(data[0].key) !== String(entries[0].key)
+    return JSON.stringify(data) !== JSON.stringify(entries)
   }
 
   function load() {
-    if (listProc.running) return
+    if (listProc.running) { loadPending = true; return }
+    loadPending = false
+    listRevision = archiveRevision
+    listLoadCount++
     listProc.command = root.storeCommand(["list", String(root.pageSize)])
     listProc.running = true
   }
@@ -173,7 +218,7 @@ Item {
   Timer { id: dndRefresh; interval: 200; onTriggered: root.refreshDnd() }
   FileView {
     // The stock daemon persists DND here; changes from shortcuts or IPC must update every panel.
-    path: Quickshell.env("HOME") + "/.local/state/omarchy/notifications.json"
+    path: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state") + "/omarchy/notifications.json"
     watchChanges: true
     onFileChanged: reload()
     onLoaded: dndRefresh.restart()
@@ -196,12 +241,21 @@ Item {
     } catch (e) {
       return
     }
+    if (entry && entry.event === "storeChanged") { archiveRevision++; reloadArchive.restart(); return }
+    if (entry && entry.event === "seenChanged") { root.readSeen(); return }
     if (!entry || !entry.key) return
     if (removedKeys[String(entry.key)]) return
-    // close_write and moved_to both fire for one popup; the second is dropped
-    // by key. One watcher for the shell, so this is no longer a per-screen race.
-    for (var i = 0; i < entries.length; i++)
-      if (entries[i].key === entry.key) return
+    for (var i = 0; i < entries.length; i++) {
+      if (entries[i].key !== entry.key) continue
+      if (JSON.stringify(entries[i]) === JSON.stringify(entry)) return
+      archiveRevision++
+      var updated = entries.slice()
+      updated[i] = entry
+      entries = updated
+      entriesReset()
+      return
+    }
+    archiveRevision++
 
     var next = [entry].concat(entries)
     if (next.length > pageSize) next = next.slice(0, pageSize)
@@ -232,25 +286,25 @@ Item {
     onTriggered: if (!watchProc.running) watchProc.running = true
   }
 
-  Timer {
-    interval: 10000
-    running: true
-    repeat: true
-    onTriggered: root.load()
-  }
+  Timer { id: reloadArchive; interval: 75; onTriggered: root.load() }
 
   Process {
     id: listProc
     environment: root.storeEnvironment
+    onExited: function(exitCode, exitStatus) {
+      if (exitCode !== 0 || exitStatus !== 0) root.loadError = "Could not refresh notification history. Reopen the center to retry."
+      if (root.loadPending) reloadArchive.restart()
+    }
     stdout: StdioCollector {
       onStreamFinished: {
+        // A watcher event newer than this read wins; reconcile again after the read drains.
+        if (root.listRevision !== root.archiveRevision) { root.loadPending = true; reloadArchive.restart(); return }
         var data
         try {
           data = JSON.parse(text)
-        } catch (e) {
-          return
-        }
-        if (!Array.isArray(data)) return
+        } catch (e) { root.loadError = "Invalid notification history response."; return }
+        if (!Array.isArray(data)) { root.loadError = "Invalid notification history response."; return }
+        root.loadError = ""
         data = root.visibleEntries(data)
         var wasLoaded = root.loaded
         root.loaded = true
@@ -289,6 +343,30 @@ Item {
     if (Plugin.ServiceRegistry.instance === root) Plugin.ServiceRegistry.instance = null
   }
 
+  // Popup actions use public IPC because plugins cannot call each other's services.
+  IpcHandler {
+    // The panel owns foamy.notification-center (open/close); the store needs a distinct target.
+    target: "foamy.notification-center.store"
+    function remove(keysCsv: string): string {
+      var keys = keysCsv.split(",")
+      if (!Array.isArray(keys) || keys.length > 100 || keys.some(function(key) {
+        return typeof key !== "string" || !/^[0-9]+-[0-9]+$/.test(key)
+      })) return "error: invalid keys"
+      root.removeMany(keys)
+      return "ok"
+    }
+    function handled(keysCsv: string): string {
+      var keys = keysCsv.split(",")
+      if (!Array.isArray(keys) || keys.length > 100 || keys.some(function(key) {
+        return typeof key !== "string" || !/^[0-9]+-[0-9]+$/.test(key)
+      })) return "error: invalid keys"
+      for (var i = 0; i < keys.length; i++) root.removedKeys[keys[i]] = true
+      root.entries = root.visibleEntries(root.entries)
+      root.entriesReset()
+      return "ok"
+    }
+  }
+
   IpcHandler {
     target: "foamy.notification-center.test"
 
@@ -311,6 +389,10 @@ Item {
     function state(): string {
       return JSON.stringify({
         entries: root.entries.length,
+        listLoads: root.listLoadCount,
+        foamyFocusAvailable: root.foamyFocusAvailable,
+        focusError: root.focusError,
+        loadError: root.loadError,
         newest: root.entries.length > 0 ? root.entries[0].summary : "",
         unread: root.unread,
         hasCriticalUnread: root.hasCriticalUnread,

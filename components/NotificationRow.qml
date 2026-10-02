@@ -14,6 +14,7 @@ Item {
   property bool groupCritical: false
   property bool hasCursor: false
   property bool dismissHasCursor: false
+  property bool compact: false
   property bool showBody: true
   property bool showPreview: true
   property double now: 0
@@ -25,7 +26,8 @@ Item {
   signal pointerUsed()
 
   readonly property bool critical: Number(entry.urgency) === 2
-  readonly property real cardHeight: texts.implicitHeight + Style.space(24)
+  readonly property real verticalPadding: Style.space(compact ? 8 : 12)
+  readonly property real cardHeight: texts.implicitHeight + verticalPadding * 2
   readonly property bool hasPreview: showPreview && String(entry.preview || "") !== "" && previewImage.status !== Image.Error
   implicitHeight: cardHeight + (last ? Style.space(layered ? 24 : 14) : 0)
 
@@ -96,7 +98,7 @@ Item {
     Column {
       id: texts
       x: Style.space(13)
-      y: Style.space(12)
+      y: root.verticalPadding
       width: parent.width - Style.space(26)
       spacing: Style.space(4)
       Text {
@@ -160,7 +162,7 @@ Item {
     NotificationAction {
       anchors.right: parent.right
       anchors.rightMargin: Style.space(8)
-      y: Style.space(9)
+      y: root.verticalPadding - Style.space(3)
       visible: root.expanded || root.dismissHasCursor
       opacity: hover.hovered || root.hasCursor ? 1 : 0
       iconName: "close"

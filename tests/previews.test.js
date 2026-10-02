@@ -99,7 +99,7 @@ test("missing preview tools preserve notification text without a raw fallback", 
   fs.mkdirSync(bin);
   // Keep the backend's base tools, but deliberately omit optional decoders.
   for (const tool of ["bash", "dirname", "jq", "flock", "mkdir", "chmod", "timeout", "head", "stat",
-    "file", "rm", "mv", "date", "grep", "tail", "sort", "comm", "cat", "basename"])
+    "file", "rm", "mv", "date", "grep", "tail", "sort", "comm", "cat", "basename", "sha256sum"])
     fs.symlinkSync(`/usr/bin/${tool}`, path.join(bin, tool));
   f.env.PATH = bin;
   f.send(image);

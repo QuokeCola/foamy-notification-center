@@ -50,6 +50,7 @@ Panel {
   readonly property int keepDays: setting("keepDays", 30)
   readonly property int maxItems: setting("maxItems", 1000)
   readonly property string clickAction: setting("clickAction", "Auto")
+  readonly property bool compact: setting("compact", false)
   readonly property bool showBody: setting("showBody", true)
   readonly property bool showPreview: setting("showPreview", true)
 
@@ -129,6 +130,10 @@ Panel {
   }
 
   Process { id: focusProc }
+  Connections {
+    target: root.store
+    function onFocusCompleted() { root.close() }
+  }
 
   function remove(key) {
     if (store) store.remove(key)
@@ -209,6 +214,10 @@ Panel {
       Quickshell.execDetached(["xdg-open", row.file])
       root.remove(row.key)
       root.close()
+      return
+    }
+    if (store && store.foamyFocusAvailable) {
+      store.focusNotification(row)
       return
     }
     // The app name is on the notification too, so it is the sender's to choose,
@@ -581,7 +590,7 @@ Panel {
           x: Style.space(14)
           width: parent.width - Style.space(28)
           textFormat: Text.PlainText
-          text: root.store ? root.tr(root.store.dndError || root.store.removalError) : ""
+          text: root.store ? root.tr(root.store.dndError || (root.store.focusError || root.store.loadError || root.store.removalError)) : ""
           visible: text !== ""
           color: Color.urgent
           font.family: root.fontFamily
@@ -628,6 +637,7 @@ Panel {
             Component {
               id: headerDelegate
               NotificationStackHeader {
+                compact: root.compact
                 group: delegateRoot.modelData.group
                 expanded: delegateRoot.modelData.expanded
                 language: root.language
@@ -645,6 +655,7 @@ Panel {
             Component {
               id: messageDelegate
               NotificationRow {
+                compact: root.compact
                 entry: delegateRoot.modelData.entry
                 first: delegateRoot.modelData.first
                 last: delegateRoot.modelData.last

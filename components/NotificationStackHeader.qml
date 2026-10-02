@@ -7,6 +7,7 @@ import "../Translations.js" as Translations
 Item {
   id: root
   required property var group
+  property bool compact: false
   property bool expanded: false
   property bool hasCursor: false
   property bool dismissHasCursor: false
@@ -19,7 +20,7 @@ Item {
   signal removeRequested()
   signal pointerUsed()
 
-  implicitHeight: Math.max(Style.space(44), labels.implicitHeight + Style.space(20))
+  implicitHeight: Math.max(Style.space(root.compact ? 32 : 44), labels.implicitHeight + Style.space(root.compact ? 8 : 20))
   readonly property bool expandable: group.entries.length > 1
   readonly property string iconSource: {
     var value = String(group.appIcon || "")
@@ -56,7 +57,7 @@ Item {
     anchors.left: parent.left
     anchors.leftMargin: Style.space(12)
     anchors.verticalCenter: parent.verticalCenter
-    width: Style.space(22)
+    width: Style.space(root.compact ? 14 : 22)
     height: width
     Image {
       id: appIcon

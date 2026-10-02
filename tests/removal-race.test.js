@@ -9,7 +9,7 @@ const Model = require("../Model.js")
 const source = fs.readFileSync(path.join(__dirname, "../Service.qml"), "utf8")
 function service() {
   const context = vm.createContext({
-    entries: [], removedKeys: {}, pageSize: 500,
+    entries: [], removedKeys: {}, pageSize: 500, archiveRevision: 0,
     pendingRemovalKeys: [], activeRemovalKeys: [], removalError: "",
     removeProc: { running: false, command: [] },
     entriesReset() {}, entryAdded() {}, storeCommand(args) { return args },
@@ -82,7 +82,7 @@ test("failed dismissal releases only failed tombstones and reloads for retry", (
   state.console = { warn() {} }
   state.exitCode = 1
   state.exitStatus = 0
-  const start = source.indexOf("    onExited: function(exitCode, exitStatus) {")
+  const start = source.indexOf("    onExited: function(exitCode, exitStatus) {", source.indexOf("    id: removeProc"))
   const end = source.indexOf("\n    }", start)
   vm.runInContext(source.slice(source.indexOf("{", start) + 1, end), state)
   assert.equal(reloads, 1)

@@ -6,7 +6,7 @@ Notification history with app stacks, search, and do not disturb.
 
 ## Install
 
-Requires Omarchy Quattro with stock notifications enabled, `jq`, and
+Requires Omarchy Quattro with stock notifications or Foamy Notifications enabled, `jq`, and
 `inotify-tools`.
 
 Picture previews also require `file` and ImageMagick 7 (`magick`). PNG, JPEG,
@@ -33,6 +33,11 @@ omarchy plugin add https://github.com/foamrider/foamy-notification-center.git --
 Set `language` on the widget entry in `shell.json`: `system` (default), `en`,
 or `nb`. Other system languages fall back to English.
 
+Set `compact` on the widget entry in `shell.json` to `true` for a slim app
+header and tighter message spacing. The default, `false`, keeps the roomier
+cards. Text and picture sizes stay unchanged. This setting is independent of
+Foamy Notifications, which defaults to compact popups.
+
 Keeps up to 1,000 notifications for 30 days by default. Silenced notifications
 remain in history; stock Omarchy exceptions still apply.
 
@@ -42,6 +47,31 @@ app. Sender commands (`exec` and `execArgv`) are never replayed or kept in the
 archive. Existing archived commands are removed on the next sync.
 Set `clickAction` to `"Focus the app"` to skip pictures, or `"Nothing"` to disable
 notification body clicks. App callbacks and URL actions cannot be replayed.
+
+When used with Foamy Notifications, activating a popup removes it from this center
+and clears its unread state. Dismissing the popup with × or right-click keeps it
+in history. The public `foamy.notification-center.store remove` IPC command accepts
+comma-separated notification keys and performs a durable removal. The companion
+`handled` command only updates the in-memory list after a caller has already
+committed that removal; Foamy Notifications uses this to avoid a second archive
+rewrite. Both accept at most 100 exact `timestamp-id` keys.
+
+Updates to an existing notification replace its archived content without creating
+another unread item. The watcher reconciles at startup and after reconnecting,
+then reports source and archive changes. There is no periodic archive polling;
+opening the panel also requests a fresh list. Reads which overlap newer events
+are retried, and duplicate filesystem events skip retention work.
+
+When Foamy Notifications is installed, app focusing uses its helper and current
+`browserMappings`, so browser messages select the same web-app window as popups.
+Ambiguous or unavailable windows leave the center entry available with an error.
+Without that plugin, the existing stock focus helper remains the fallback. This
+integration does not execute archived sender commands or restore dead callbacks.
+
+Text-only replacements reuse retained images and previews. Each plugin still owns
+its own image lifetime and cleanup: the center's longer retention does not depend
+on the popup cache. Changed source files invalidate thumbnail reuse; conversion
+limits and text-only fallback remain in place.
 
 ## Remove
 

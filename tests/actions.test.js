@@ -13,7 +13,7 @@ const activate = panel.slice(start, panel.indexOf("\n  }", start) + 4)
 
 function view(mode = "Auto") {
   const state = vm.createContext({
-    clickAction: mode, Model, omarchyPath: "/omarchy", focusProc: {},
+    clickAction: mode, Model, store: null, omarchyPath: "/omarchy", focusProc: {},
     actions: [], images: [], removed: [], closed: 0,
     Util: { execArgv(argv) { state.actions.push(argv) } },
     Quickshell: { execDetached(argv) { state.images.push(argv) } },
@@ -152,4 +152,12 @@ test("only absolute raster paths can reach the fixed opener; click settings stil
     assert.equal(nothing.focusProc.running, undefined)
     assert.equal(nothing.closed, 0)
   }
+})
+
+test('Foamy integration delegates browser focus without replaying archived commands or dismissing early',()=>{
+ const state=view(),calls=[]
+ state.store={foamyFocusAvailable:true,focusNotification(row){calls.push(row)}}
+ const row={key:'100-1',app:'Vivaldi',body:'teams.microsoft.com',execArgv:'["unsafe"]'}
+ state.activate(row)
+ assert.equal(calls[0],row);assert.equal(state.removed.length,0);assert.equal(state.closed,0);assert.equal(state.actions.length,0)
 })
