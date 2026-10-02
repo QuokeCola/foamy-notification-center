@@ -58,7 +58,10 @@ rewrite. Both accept at most 100 exact `timestamp-id` keys.
 
 Updates to an existing notification replace its archived content without creating
 another unread item. The watcher reconciles at startup and after reconnecting,
-then reports source and archive changes. There is no periodic archive polling;
+then reports source and archive changes. With a custom `XDG_STATE_HOME`, it reads
+stock notifications from `~/.local/state/omarchy` and enabled Foamy notifications
+from `$XDG_STATE_HOME/omarchy`. The archive remains in `XDG_STATE_HOME` in both
+cases. Changing the enabled plugin in `shell.json` reconnects the source watcher. There is no periodic archive polling;
 opening the panel also requests a fresh list. Reads which overlap newer events
 are retried, and duplicate filesystem events skip retention work.
 
@@ -96,3 +99,12 @@ Omarchy and Lucide notices are in [LICENSE-OMARCHY](LICENSE-OMARCHY) and
 [LICENSE-LUCIDE](LICENSE-LUCIDE).
 
 Provided **as is**, without warranty or guaranteed support. Use at your own risk.
+
+Stock compatibility can be checked without touching personal history:
+
+```sh
+python3 tests/stock-runtime.py
+python3 tests/stock-runtime.py --custom
+```
+
+These checks use a private D-Bus session and temporary home directory.

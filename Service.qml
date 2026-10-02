@@ -216,14 +216,6 @@ Item {
   }
 
   Timer { id: dndRefresh; interval: 200; onTriggered: root.refreshDnd() }
-  FileView {
-    // The stock daemon persists DND here; changes from shortcuts or IPC must update every panel.
-    path: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state") + "/omarchy/notifications.json"
-    watchChanges: true
-    onFileChanged: reload()
-    onLoaded: dndRefresh.restart()
-    onLoadFailed: dndRefresh.restart()
-  }
 
   // Detached, like remove and seed above it: a clear that arrives while the
   // previous one is still running used to return early and never happen, so
@@ -242,6 +234,7 @@ Item {
       return
     }
     if (entry && entry.event === "storeChanged") { archiveRevision++; reloadArchive.restart(); return }
+    if (entry && entry.event === "dndChanged") { dndRefresh.restart(); return }
     if (entry && entry.event === "seenChanged") { root.readSeen(); return }
     if (!entry || !entry.key) return
     if (removedKeys[String(entry.key)]) return
@@ -269,6 +262,20 @@ Item {
     })
   }
 
+  property bool sourceRestartPending: false
+  FileView {
+    path: (Quickshell.env("XDG_CONFIG_HOME") || Quickshell.env("HOME") + "/.config") + "/omarchy/shell.json"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: {
+      reload()
+      // A daemon switch must re-resolve the source without restarting the center.
+      root.sourceRestartPending = true
+      if (watchProc.running) watchProc.running = false
+      else { restartWatch.interval = 100; restartWatch.restart() }
+    }
+  }
+
   Process {
     id: watchProc
     command: root.storeCommand(["watch"])
@@ -277,13 +284,16 @@ Item {
     stdout: SplitParser {
       onRead: function(line) { root.absorb(line) }
     }
-    onExited: restartWatch.restart()
+    onExited: {
+      restartWatch.interval = root.sourceRestartPending ? 100 : 30000
+      restartWatch.restart()
+    }
   }
 
   Timer {
     id: restartWatch
     interval: 30000
-    onTriggered: if (!watchProc.running) watchProc.running = true
+    onTriggered: { root.sourceRestartPending = false; if (!watchProc.running) watchProc.running = true }
   }
 
   Timer { id: reloadArchive; interval: 75; onTriggered: root.load() }

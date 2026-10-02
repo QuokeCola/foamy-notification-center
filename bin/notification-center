@@ -25,13 +25,22 @@ umask 077
 
 state_home=${XDG_STATE_HOME:-$HOME/.local/state}
 
-# Where the notification service puts what it received. Live popups sit in the
-# first, everything that left the screen in the second.
-# Overridable so the whole thing can be pointed at a scratch directory and
-# driven by hand, which is the only way to exercise the watcher without waiting
-# for real notifications to arrive.
-src_dir=${NC_SRC_DIR:-$state_home/omarchy/notifications}
+# Stock Omarchy uses HOME even with a custom XDG_STATE_HOME. Foamy follows XDG.
+# Resolve the configured daemon separately from our archive; installation alone
+# does not mean Foamy owns notifications. Explicit source overrides still win.
+notification_state_home=$HOME/.local/state
+config_home=${XDG_CONFIG_HOME:-$HOME/.config}
+shell_config=$config_home/omarchy/shell.json
+foamy_manifest=$config_home/omarchy/plugins/foamy.notifications/manifest.json
+if [[ -f $shell_config && -f $foamy_manifest ]] &&
+   jq -e '.id == "foamy.notifications"' "$foamy_manifest" >/dev/null 2>&1 &&
+   jq -e 'any(.plugins[]?; .id == "foamy.notifications") and
+     ((.disabledPlugins // []) | index("foamy.notifications") | not)' "$shell_config" >/dev/null 2>&1; then
+  notification_state_home=$state_home
+fi
+src_dir=${NC_SRC_DIR:-$notification_state_home/omarchy/notifications}
 src_history=${NC_SRC_HISTORY:-$src_dir/history}
+source_state_dir=$(dirname "$src_dir")
 
 # Ours.
 store=${NC_STORE:-$state_home/omarchy-notification-center}
@@ -491,9 +500,10 @@ cmd_watch() {
   ensure_store
   mkdir -p "$src_dir" "$src_history"
   command -v inotifywait >/dev/null 2>&1 || die "inotifywait is not installed"
+  # Include the state directory so even the first DND file creation is observed.
   # Establish watches before startup reconciliation so arrivals cannot fall into a gap.
-  exec 3< <(LC_ALL=C inotifywait -m -e close_write -e moved_to -e delete --format '%e|%w%f' \
-    "$src_dir" "$src_history" "$store" 2>&1)
+  exec 3< <(LC_ALL=C inotifywait -m -e close_write -e moved_to -e delete -e create --format '%e|%w%f' \
+    "$src_dir" "$src_history" "$source_state_dir" "$store" 2>&1)
   watcher=$!
   trap 'kill "$watcher" 2>/dev/null || true' EXIT INT TERM
   local event file ready=0
@@ -509,6 +519,11 @@ cmd_watch() {
       printf '%s\n' '{"event":"storeChanged"}'
     elif [[ $file == "$store/archive.jsonl" || $file == "$cleared_at_file" || $file == "$dismissed_file" ]]; then
       printf '%s\n' '{"event":"storeChanged"}'
+    elif [[ $file == "$source_state_dir/notifications.json" ]]; then
+      printf '%s\n' '{"event":"dndChanged"}'
+    elif [[ $event == CREATE* ]]; then
+      # Ordinary JSON writes are ingested only when complete; Qt links its DND file atomically.
+      continue
     elif [[ $file == "$seen_file" ]]; then
       printf '%s\n' '{"event":"seenChanged"}'
     elif [[ $file == "$src_dir/"*.json || $file == "$src_history/"*.json ]]; then
@@ -539,11 +554,15 @@ cmd_list() {
   # filtered rather than deleted, so the cut has to happen before the limit:
   # take the newest N of what is still showing, not what is left of the newest
   # N after the cleared ones are dropped out of it.
-  tac "$archive" 2>/dev/null \
-    | jq -Rc --argjson cleared "$cleared_at" \
-        'fromjson? // empty | select((.timestamp // 0) > $cleared)' 2>/dev/null \
-    | head -n "$limit" \
-    | jq -s '.' 2>/dev/null || printf '[]\n'
+  [[ $limit =~ ^[0-9]+$ ]] || die "list limit must be a nonnegative integer"
+  local result
+  # Consume the whole stream but retain only the requested page. Closing a pipe
+  # early with head causes SIGPIPE and can append a second JSON value under pipefail.
+  result=$(tac "$archive" | jq -Rnc --argjson cleared "$cleared_at" --argjson limit "$limit" '
+    reduce (inputs | fromjson? | select((.timestamp // 0) > $cleared)) as $row
+      ([]; if length < $limit then . + [$row] else . end)
+  ') || die "cannot read notification archive"
+  printf '%s\n' "$result"
 }
 
 cmd_remove() {

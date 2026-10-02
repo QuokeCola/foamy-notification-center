@@ -10,7 +10,7 @@ test("prune retains valid records after corruption and clear preserves the archi
   try {
     const state = path.join(temp, "omarchy-notification-center");
     fs.mkdirSync(state, { recursive: true });
-    const env = { ...process.env, XDG_STATE_HOME: temp, NC_KEEP_DAYS: "30", NC_MAX_ITEMS: "1000" };
+    const env = { ...process.env, HOME: temp, XDG_CONFIG_HOME: path.join(temp, "config"), XDG_STATE_HOME: temp, NC_KEEP_DAYS: "30", NC_MAX_ITEMS: "1000" };
     const script = path.join(__dirname, "../bin/notification-center");
     const run = (...args) => {
       const result = spawnSync("bash", [script, ...args], { env, encoding: "utf8" });

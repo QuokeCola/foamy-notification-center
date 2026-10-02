@@ -51,3 +51,28 @@ test('queued archive refreshes and content comparisons do not drop updates',()=>
  assert.equal(state.differsFrom([{key:'1-1',body:'new'}]),true)
  state.load();assert.equal(state.loadPending,true);state.listProc.running=false;state.load();assert.equal(state.listRevision,2);assert.equal(state.loadPending,false)
 })
+
+test('large archive pages contain one JSON array, filter before limiting, and keep newest order',t=>{
+ const f=fixture(t);f.run('list')
+ const records=Array.from({length:1000},(_,i)=>({key:`${i+1}-1`,timestamp:i+1,body:'x'.repeat(1000)}))
+ fs.writeFileSync(path.join(f.store,'archive.jsonl'),records.map(JSON.stringify).join('\n')+'\ninvalid\n')
+ const page=f.run('list','500');assert.equal(page.length,500);assert.equal(page[0].key,'1000-1');assert.equal(page[499].key,'501-1')
+ fs.writeFileSync(path.join(f.store,'cleared_at'),'750');assert.equal(f.run('list','500').length,250)
+ assert.deepEqual(f.run('list','0'),[])
+ const bad=spawnSync(script,['list','invalid'],{env:f.env,encoding:'utf8'});assert.equal(bad.status,1);assert.equal(JSON.parse(bad.stdout).ok,false)
+})
+test('custom state home follows stock unless Foamy is both installed and enabled',t=>{
+ const f=fixture(t),home=path.join(f.dir,'home'),xdg=path.join(f.dir,'custom'),config=path.join(home,'.config/omarchy')
+ fs.mkdirSync(config,{recursive:true})
+ const env={...f.env,HOME:home,XDG_CONFIG_HOME:path.join(home,'.config'),XDG_STATE_HOME:xdg};delete env.NC_SRC_DIR;delete env.NC_SRC_HISTORY
+ const run=(...args)=>{const r=spawnSync(script,args,{env,encoding:'utf8',timeout:5000});assert.equal(r.status,0,r.stderr);return JSON.parse(r.stdout)}
+ const stamp=Date.now()
+ for(const [base,title,id] of [[path.join(home,'.local/state'),'Stock',1],[xdg,'Foamy',2]]) {
+  const dir=path.join(base,'omarchy/notifications');fs.mkdirSync(dir,{recursive:true});fs.writeFileSync(path.join(dir,`${stamp}-${id}.json`),JSON.stringify({timestamp:stamp,originalId:id,app:'Test',summary:title}))
+ }
+ const manifest=path.join(config,'plugins/foamy.notifications');fs.mkdirSync(manifest,{recursive:true});fs.writeFileSync(path.join(manifest,'manifest.json'),JSON.stringify({id:'foamy.notifications'}))
+ for(const [cfg,expected] of [[{plugins:[]},'Stock'],[{plugins:[{id:'foamy.notifications'}]},'Foamy'],[{plugins:[{id:'foamy.notifications'}],disabledPlugins:['foamy.notifications']},'Stock']]) {
+  fs.writeFileSync(path.join(config,'shell.json'),JSON.stringify(cfg));fs.rmSync(f.store,{recursive:true,force:true});run('sync');assert.deepEqual(run('list').map(r=>r.summary),[expected])
+ }
+ fs.unlinkSync(path.join(manifest,'manifest.json'));fs.writeFileSync(path.join(config,'shell.json'),JSON.stringify({plugins:[{id:'foamy.notifications'}]}));fs.rmSync(f.store,{recursive:true,force:true});run('sync');assert.deepEqual(run('list').map(r=>r.summary),['Stock'])
+})
