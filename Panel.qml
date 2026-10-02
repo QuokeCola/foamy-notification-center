@@ -385,6 +385,11 @@ Panel {
       Math.max(popup.verticalContentInset, content.implicitHeight + Style.space(10) + popup.verticalContentInset),
       popup.usableCardHeight))
 
+    Behavior on contentHeight {
+      enabled: root.opened
+      NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
+    }
+
     // The stock omarchy bar window is only as tall as the bar strip, so the
     // screen minus that window is the space a panel has. Some bars draw their
     // strip inside a screen-sized window instead, which makes KeyboardPanel
@@ -616,14 +621,36 @@ Panel {
           }
 
           height: Math.min(contentHeight, cap)
-          visible: root.rows.length > 0
-          model: root.rows
+          visible: root.rows.length > 0 || contentHeight > 0
+          rows: root.rows
+          entranceDistance: Style.space(8)
           spacing: 0
 
           delegate: Item {
             id: delegateRoot
-            required property var modelData
+            required property string rowId
+            // Qt can deliver removal after the source map has already advanced.
+            property var retainedData: null
+            property var modelData: list.rowsById[rowId] || retainedData
+            onModelDataChanged: if (modelData) retainedData = modelData
             required property int index
+            property real entranceOffset: 0
+            property bool retired: false
+            enabled: !retired
+            transform: Translate { y: delegateRoot.entranceOffset }
+            ListView.delayRemove: exitMotion.running
+            ListView.onRemove: {
+              // Freeze departing content until Qt finishes its removal transition.
+              modelData = modelData
+              retired = true
+              exitMotion.start()
+            }
+            SequentialAnimation {
+              id: exitMotion
+              NumberAnimation { target: delegateRoot; property: "opacity"; to: 0; duration: 120; easing.type: Easing.OutCubic }
+              // Let ListView lay out the shrinking space, including its scroll extent.
+              NumberAnimation { target: delegateRoot; property: "height"; to: 0; duration: 140; easing.type: Easing.OutCubic }
+            }
             width: list.width
             height: rowLoader.implicitHeight
 
@@ -684,7 +711,7 @@ Panel {
           textFormat: Text.PlainText
           x: Style.space(14)
           width: parent.width - Style.space(28)
-          visible: root.rows.length === 0
+          visible: root.rows.length === 0 && list.contentHeight <= 0
           horizontalAlignment: Text.AlignHCenter
           topPadding: Style.space(22)
           bottomPadding: Style.space(22)

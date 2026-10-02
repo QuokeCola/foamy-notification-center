@@ -38,6 +38,11 @@ header and tighter message spacing. The default, `false`, keeps the roomier
 cards. Text and picture sizes stay unchanged. This setting is independent of
 Foamy Notifications, which defaults to compact popups.
 
+Cards use the same motion as Foamy popups: a 180 ms fade with an 8 px lift on
+arrival and a 120 ms fade on removal. The departed row then collapses over
+140 ms so remaining cards move smoothly. The panel height also animates.
+Message updates retain their card, and scrolling does not replay the entrance.
+
 Keeps up to 1,000 notifications for 30 days by default. Silenced notifications
 remain in history; stock Omarchy exceptions still apply.
 
@@ -99,6 +104,9 @@ Omarchy and Lucide notices are in [LICENSE-OMARCHY](LICENSE-OMARCHY) and
 [LICENSE-LUCIDE](LICENSE-LUCIDE).
 
 Provided **as is**, without warranty or guaranteed support. Use at your own risk.
+
+Card animations can be checked with `python3 tests/motion.py` (isolated Qt) or
+`python3 tests/motion.py --desktop` (Wayland). Both use synthetic history.
 
 Stock compatibility can be checked without touching personal history:
 

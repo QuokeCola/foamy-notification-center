@@ -238,21 +238,11 @@ preview_source() {
   printf '%s' "$action" | grep -oiE "(file://)?/[^\"' ]*\.(jpe?g|png|webp|gif)" | head -n 1
 }
 
-# Take one of the service's JSON files into the archive, and print the entry
-# that was added.
-#
-# The second argument is what makes two screens work. The bar runs once per
-# monitor and each copy has its own watcher, so both see the same notification
-# and both try to archive it; one takes the lock first and the other finds the
-# key already there. If that second one stayed silent, the panel on its screen
-# would never hear about the notification at all, and would sit there missing
-# it until something else made it re-read the archive. So a live watcher prints
-# the entry whether it wrote it or found it, and the panels drop the duplicate
-# by key. The catch-up sync passes 0 instead, or starting the shell would
-# replay the whole archive at both of them.
+# Archive new or changed source content. One shared service receives these
+# updates; unchanged filesystem events must not repeat unread or retention work.
 ingest_file() {
   local LC_ALL=C
-  local file=$1 announce_existing=${2:-0}
+  local file=$1
   local key entry app_icon image_src exec_src icon_copy image_copy file_src preview_copy existing source_hash assets_hash sources_hash source_json asset
   key=$(basename -- "$file"); key=${key%.json}
   [[ $key =~ ^[0-9]+-[0-9]+$ ]] || return 0
@@ -535,7 +525,7 @@ cmd_watch() {
 
 ingest_one() {
   ingest_changed=0
-  ingest_file "$1" 1 || return $?
+  ingest_file "$1" || return $?
   # Duplicate filesystem events and archival moves do not need a retention rewrite.
   (( ingest_changed )) && prune
   return 0
