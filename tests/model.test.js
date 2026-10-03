@@ -30,3 +30,16 @@ assert.deepEqual(Model.unreadState(null, "invalid"), {
 })
 
 console.log("Notification center model tests passed.")
+
+// Icon colour ignores greys and follows the most common vivid hue.
+{
+  const px = (r, g, b, a = 255) => [r, g, b, a]
+  const green = Array(20).fill(px(30, 200, 80)).flat()
+  const red = Array(5).fill(px(220, 40, 40)).flat()
+  const grey = Array(50).fill(px(128, 128, 128)).flat()
+  const clear = Array(30).fill(px(255, 0, 0, 0)).flat()
+  const rgb = Model.dominantColor([...grey, ...green, ...red, ...clear])
+  assert.ok(rgb.g > rgb.r && rgb.g > rgb.b)
+  assert.equal(Model.dominantColor([...grey, ...clear]), null)
+  assert.equal(Model.dominantColor([...Array(200).fill(px(128, 128, 128)).flat(), ...red]), null)
+}

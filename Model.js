@@ -92,6 +92,38 @@ function stackRows(entries, expanded, filter) {
   return rows
 }
 
+// The colour an app's icon is known by: the hue that most of its vivid pixels
+// share, averaged within that hue. Greys, near-blacks and transparent pixels
+// do not vote, so a monochrome icon yields null and the caller keeps its own
+// colour. `data` is RGBA bytes, as Canvas getImageData returns them.
+function dominantColor(data) {
+  var bins = []
+  for (var b = 0; b < 12; b++) bins.push({ w: 0, r: 0, g: 0, b: 0 })
+  var opaque = 0, total = 0
+  for (var i = 0; i + 3 < data.length; i += 4) {
+    var r = data[i], g = data[i + 1], bl = data[i + 2], a = data[i + 3]
+    if (a < 128) continue
+    opaque++
+    var max = Math.max(r, g, bl), min = Math.min(r, g, bl)
+    if (max < 48) continue
+    var sat = (max - min) / max
+    if (sat < 0.3) continue
+    var d = max - min, hue
+    if (max === r) hue = ((g - bl) / d + 6) % 6
+    else if (max === g) hue = (bl - r) / d + 2
+    else hue = (r - g) / d + 4
+    var bin = bins[Math.floor(hue * 2) % 12]
+    var w = sat * a / 255
+    bin.w += w; bin.r += r * w; bin.g += g * w; bin.b += bl * w
+    total += w
+  }
+  // A few coloured pixels on a grey icon are an accent, not its colour.
+  if (!opaque || total < opaque * 0.08) return null
+  var best = bins[0]
+  for (var k = 1; k < 12; k++) if (bins[k].w > best.w) best = bins[k]
+  return { r: best.r / best.w / 255, g: best.g / best.w / 255, b: best.b / best.w / 255 }
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     isPreviewFile: isPreviewFile,
@@ -99,6 +131,7 @@ if (typeof module !== "undefined") {
     unreadState: unreadState,
     relativeTime: relativeTime,
     groupsFor: groupsFor,
-    stackRows: stackRows
+    stackRows: stackRows,
+    dominantColor: dominantColor
   }
 }

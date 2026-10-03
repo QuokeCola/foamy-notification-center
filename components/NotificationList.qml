@@ -6,6 +6,28 @@ ListView {
   property var rows: []
   property var rowsById: ({})
   property real entranceDistance: 8
+  // Set while a stack folds or unfolds; its rows run their own motion.
+  property string stackingGroup: ""
+  // Delegates that exist right now, by row id, so a card can find the front
+  // card of its stack to tuck behind. Plain object for cheap lookups;
+  // liveVersion is what bindings depend on.
+  property var liveRows: ({})
+  property int liveVersion: 0
+  function registerRow(id, item) { liveRows[id] = item; liveVersion++ }
+  function unregisterRow(id, item) {
+    if (liveRows[id] !== item) return
+    delete liveRows[id]
+    liveVersion++
+  }
+  function liveRow(id) { liveVersion; return liveRows[id] || null }
+  // True while a real card of this stack sits where the folded edges are drawn.
+  function hasTuckedCards(group) {
+    liveVersion
+    var entries = group ? group.entries : []
+    for (var i = 1; i < Math.min(3, entries.length); i++)
+      if (liveRows["entry:" + entries[i].key]) return true
+    return false
+  }
   model: rowModel
   ListModel { id: rowModel }
   onRowsChanged: reconcileRows()
@@ -31,7 +53,7 @@ ListView {
   }
 
   add: Transition {
-    enabled: root.model === rowModel
+    enabled: root.model === rowModel && root.stackingGroup === ""
     ParallelAnimation {
       NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 180; easing.type: Easing.OutCubic }
       NumberAnimation { property: "entranceOffset"; from: root.entranceDistance; to: 0; duration: 180; easing.type: Easing.OutCubic }

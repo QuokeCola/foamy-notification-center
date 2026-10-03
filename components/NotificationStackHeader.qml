@@ -20,7 +20,7 @@ Item {
   signal removeRequested()
   signal pointerUsed()
 
-  implicitHeight: Math.max(Style.space(root.compact ? 32 : 44), labels.implicitHeight + Style.space(root.compact ? 8 : 20))
+  implicitHeight: Math.max(Style.space(root.compact ? 28 : 36), labels.implicitHeight + Style.space(root.compact ? 8 : 14))
   readonly property bool expandable: group.entries.length > 1
   readonly property string iconSource: {
     var value = String(group.appIcon || "")
@@ -31,13 +31,7 @@ Item {
   }
 
   HoverHandler { id: hover; onHoveredChanged: if (hovered) root.pointerUsed() }
-  StackFrame {
-    anchors.fill: parent
-    first: true
-    critical: root.group.critical
-    foreground: root.foreground
-    fill: Qt.tint(Color.popups.background, Util.alpha(root.foreground, 0.055))
-  }
+  // No frame: the app's name sits on the panel above its cards.
   Rectangle {
     anchors.fill: headingMouse
     color: "transparent"
@@ -55,9 +49,9 @@ Item {
   Item {
     id: avatar
     anchors.left: parent.left
-    anchors.leftMargin: Style.space(12)
+    anchors.leftMargin: Style.space(4)
     anchors.verticalCenter: parent.verticalCenter
-    width: Style.space(root.compact ? 14 : 22)
+    width: Style.space(root.compact ? 14 : 18)
     height: width
     Image {
       id: appIcon

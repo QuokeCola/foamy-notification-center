@@ -130,6 +130,48 @@ Panel {
   }
 
   Process { id: focusProc }
+
+  // ------------------------------------------------------------ app colours
+  //
+  // Urgent cards are marked in the colour of the app that sent them. Each
+  // icon is drawn once into a small hidden canvas and read back; the result,
+  // or null for an icon with no colour of its own, is kept for the session.
+  property var appTints: ({})
+  property int appTintsVersion: 0
+  property var tintQueue: []
+
+  function iconUrl(value) {
+    value = String(value || "")
+    if (!value) return ""
+    if (value.indexOf("file://") === 0 || value.indexOf("image://") === 0) return value
+    if (value.charAt(0) === "/") return Util.fileUrl(value)
+    return Quickshell.iconPath(value, true)
+  }
+
+  function tintFor(group) {
+    appTintsVersion
+    var url = group ? iconUrl(group.appIcon) : ""
+    if (!url) return Color.urgent
+    if (!(url in appTints)) {
+      if (tintQueue.indexOf(url) < 0) tintQueue.push(url)
+      Qt.callLater(function() { tinter.next() })
+      return Color.urgent
+    }
+    return appTints[url] || Color.urgent
+  }
+
+  function storeTint(url, rgb) {
+    var next = Object.assign({}, appTints)
+    if (rgb) {
+      // Keep the hue, but hold saturation and lightness where a thin line
+      // and a faint wash both read on a dark surface.
+      var c = Qt.rgba(rgb.r, rgb.g, rgb.b, 1)
+      next[url] = Qt.hsla(c.hslHue, Math.max(0.55, c.hslSaturation),
+                          Math.min(0.68, Math.max(0.55, c.hslLightness)), 1)
+    } else next[url] = null
+    appTints = next
+    appTintsVersion++
+  }
   Connections {
     target: root.store
     function onFocusCompleted() { root.close() }
@@ -172,7 +214,18 @@ Panel {
     var next = Object.assign(Object.create(null), expandedGroups)
     next[key] = !next[key]
     expandedGroups = next
+    // Rows this rebuild adds or drops belong to the stack, not to arrivals or
+    // dismissals: they slide out from under the card above, or back beneath it.
+    list.stackingGroup = key
+    stackingDone.restart()
     rebuild()
+  }
+
+  Timer {
+    id: stackingDone
+    // Longer than the staggered motion of a tall stack's visible cards.
+    interval: 800
+    onTriggered: list.stackingGroup = ""
   }
 
   function removeGroup(group) {
@@ -374,19 +427,31 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     padding: 0
+    // A sheet along the screen edge: square, flush with the bar, the side
+    // and the bottom, and it slides in from that edge rather than fading.
+    margin: 0
+    gap: 0
+    cornerRadius: 0
+    slideIn: true
     borderSpec: Border.flat(Qt.alpha(Color.popups.text, 0.15), 1)
+    // Translucent, so the compositor's blur on omarchy-keyboard-panel shows
+    // through; cards stay opaque on top of it.
+    surfaceColor: Qt.alpha(Color.popups.background, 0.72)
     contentWidth: popup.fittedContentWidth(Style.space(root.panelWidth))
-    // fittedContentHeight() clamps against availableCardHeight, which collapses
-    // to its 120px minimum under a screen-sized bar window (see
-    // usableCardHeight below), so the same fit is done here against the
-    // corrected ceiling: the content plus the card insets, never taller than
-    // the space the screen actually has.
-    contentHeight: Math.round(Math.min(
-      Math.max(popup.verticalContentInset, content.implicitHeight + Style.space(10) + popup.verticalContentInset),
-      popup.usableCardHeight))
+    // A column down the whole side of the screen, from under the bar to the
+    // bottom, whatever it holds. A listHeight setting still opts back into a
+    // card that fits its content: fittedContentHeight() clamps against
+    // availableCardHeight, which collapses to its 120px minimum under a
+    // screen-sized bar window (see usableCardHeight below), so that fit is
+    // done here against the corrected ceiling.
+    contentHeight: root.listHeight > 0
+      ? Math.round(Math.min(
+          Math.max(popup.verticalContentInset, content.implicitHeight + Style.space(10) + popup.verticalContentInset),
+          popup.usableCardHeight))
+      : Math.round(popup.usableCardHeight)
 
     Behavior on contentHeight {
-      enabled: root.opened
+      enabled: root.opened && root.listHeight > 0
       NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
     }
 
@@ -421,6 +486,44 @@ Panel {
         if (text === "/") root.startSearch()
       }
 
+      // Draws one queued icon at a time for tintFor(). Invisible, but it has
+      // to stay in the scene for the canvas to paint.
+      Canvas {
+        id: tinter
+        width: 32
+        height: 32
+        opacity: 0
+        property string current: ""
+        function next() {
+          if (current || root.tintQueue.length === 0) return
+          current = root.tintQueue.shift()
+          tintTimeout.restart()
+          if (isImageLoaded(current)) requestPaint()
+          else loadImage(current)
+        }
+        function finish(rgb) {
+          tintTimeout.stop()
+          var url = current
+          current = ""
+          if (url) root.storeTint(url, rgb)
+          Qt.callLater(next)
+        }
+        onImageLoaded: if (current && isImageLoaded(current)) requestPaint()
+        onPaint: {
+          if (!current || !isImageLoaded(current)) return
+          var ctx = getContext("2d")
+          ctx.reset()
+          ctx.drawImage(current, 0, 0, width, height)
+          finish(Model.dominantColor(ctx.getImageData(0, 0, width, height).data))
+        }
+        Timer {
+          id: tintTimeout
+          // An icon that never loads keeps the default colour.
+          interval: 2000
+          onTriggered: tinter.finish(null)
+        }
+      }
+
       Column {
         id: content
         anchors.fill: parent
@@ -433,39 +536,11 @@ Panel {
           width: parent.width
           height: Style.space(58)
 
-          Canvas {
-            anchors.fill: parent
-            property color surface: Color.popups.background
-            property color accent: Color.accent
-            onSurfaceChanged: requestPaint()
-            onAccentChanged: requestPaint()
-            onWidthChanged: requestPaint()
-            onHeightChanged: requestPaint()
-            onPaint: {
-              var ctx = getContext("2d")
-              ctx.reset()
-              var r = Style.space(13)
-              ctx.beginPath()
-              ctx.moveTo(r, 0)
-              ctx.lineTo(width - r, 0)
-              ctx.quadraticCurveTo(width, 0, width, r)
-              ctx.lineTo(width, height)
-              ctx.lineTo(0, height)
-              ctx.lineTo(0, r)
-              ctx.quadraticCurveTo(0, 0, r, 0)
-              ctx.closePath()
-              var wash = ctx.createLinearGradient(0, 0, width, height)
-              wash.addColorStop(0, Qt.tint(surface, Qt.alpha(accent, 0.12)))
-              wash.addColorStop(1, Qt.tint(surface, Qt.alpha(accent, 0.035)))
-              ctx.fillStyle = wash
-              ctx.fill()
-            }
-          }
           Rectangle {
             anchors.bottom: parent.bottom
             width: parent.width
             height: 1
-            color: Qt.alpha(root.foreground, 0.08)
+            color: Qt.alpha(root.foreground, 0.12)
           }
 
           Column {
@@ -620,7 +695,7 @@ Panel {
             return root.listHeight > 0 ? Math.min(Style.space(root.listHeight), available) : available
           }
 
-          height: Math.min(contentHeight, cap)
+          height: root.listHeight > 0 ? Math.min(contentHeight, cap) : cap
           visible: root.rows.length > 0 || contentHeight > 0
           rows: root.rows
           entranceDistance: Style.space(8)
@@ -636,14 +711,66 @@ Panel {
             required property int index
             property real entranceOffset: 0
             property bool retired: false
+            // 1 is laid out in the list, 0 is tucked behind the front card of
+            // its stack. The slot height, the slide and the shrink are all
+            // linear in this one value, so they can never drift apart.
+            property real reveal: 1
+            // Position within the stack: 0 is the front card (and headers).
+            readonly property int stackDepth: {
+              if (!modelData || modelData.kind !== "message") return 0
+              var entries = modelData.group.entries
+              for (var i = 0; i < entries.length; i++)
+                if (entries[i].key === modelData.entry.key) return i
+              return 0
+            }
+            readonly property bool stacking: !!modelData && modelData.kind === "message"
+              && list.stackingGroup !== "" && modelData.group.key === list.stackingGroup
+            readonly property real cardHeight: rowLoader.item && rowLoader.item.cardHeight !== undefined
+              ? rowLoader.item.cardHeight : rowLoader.implicitHeight
+            readonly property var front: stackDepth > 0
+              ? list.liveRow("entry:" + modelData.group.entries[0].key) : null
+            // Tucked geometry, shared with the folded edges NotificationRow
+            // draws, so a card that finishes folding lands exactly on them.
+            readonly property real tuckScale: stackDepth === 1 ? 0.94 : 0.88
+            readonly property real tuckPeek: Style.space(stackDepth === 1 ? 7 : 13)
+            // How far the card moves, in list coordinates, to put its bottom
+            // just below the front card's. Without a front card on screen it
+            // slides out of its own slot instead.
+            readonly property real tuckShift: front
+              ? front.y + front.cardHeight + tuckPeek - cardHeight - y
+              : -rowLoader.implicitHeight
+            // A card taller than the front one is cut to its height while
+            // tucked, so it never shows above the stack.
+            readonly property real hiddenTop: front
+              ? Math.max(0, cardHeight - front.cardHeight) * (1 - reveal) : 0
+
+            // Shallower cards paint over deeper ones, so cards pass behind.
+            z: -stackDepth
+            clip: reveal < 1 && !front
             enabled: !retired
             transform: Translate { y: delegateRoot.entranceOffset }
-            ListView.delayRemove: exitMotion.running
+            Component.onCompleted: {
+              list.registerRow(rowId, delegateRoot)
+              if (stacking && stackDepth > 0) {
+                reveal = 0
+                unstackMotion.start()
+              }
+            }
+            Component.onDestruction: list.unregisterRow(rowId, delegateRoot)
+            SequentialAnimation {
+              id: unstackMotion
+              PauseAnimation { duration: Math.max(0, Math.min(delegateRoot.stackDepth - 1, 5)) * 30 }
+              NumberAnimation { target: delegateRoot; property: "reveal"; to: 1; duration: 340; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.8, 0, 0.2, 1, 1, 1] }
+            }
+            ListView.delayRemove: exitMotion.running || stackMotion.running
             ListView.onRemove: {
               // Freeze departing content until Qt finishes its removal transition.
               modelData = modelData
               retired = true
-              exitMotion.start()
+              if (stacking) {
+                unstackMotion.stop()
+                stackMotion.start()
+              } else exitMotion.start()
             }
             SequentialAnimation {
               id: exitMotion
@@ -651,15 +778,43 @@ Panel {
               // Let ListView lay out the shrinking space, including its scroll extent.
               NumberAnimation { target: delegateRoot; property: "height"; to: 0; duration: 140; easing.type: Easing.OutCubic }
             }
+            SequentialAnimation {
+              id: stackMotion
+              // Deeper cards set off first, so each one goes behind a card
+              // that is still there to hide it.
+              PauseAnimation { duration: Math.max(0, 4 - Math.min(delegateRoot.stackDepth - 1, 4)) * 20 }
+              NumberAnimation { target: delegateRoot; property: "reveal"; to: 0; duration: 300; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.8, 0, 0.2, 1, 1, 1] }
+            }
             width: list.width
-            height: rowLoader.implicitHeight
+            height: rowLoader.implicitHeight * reveal
 
-            Loader {
-              id: rowLoader
-              // ListView positions delegates; inset their content instead of the delegate itself.
-              x: Style.space(14)
-              width: parent.width - Style.space(28)
-              sourceComponent: delegateRoot.modelData.kind === "header" ? headerDelegate : messageDelegate
+            Item {
+              id: stackWindow
+              // Full width, so a clipped card still shows its urgent line in
+              // the margin beside it.
+              y: delegateRoot.hiddenTop
+              width: parent.width
+              height: rowLoader.implicitHeight - y
+              clip: delegateRoot.hiddenTop > 0
+              transform: [
+                Scale {
+                  readonly property real s: 1 - (1 - delegateRoot.reveal) * (1 - delegateRoot.tuckScale)
+                  origin.x: stackWindow.width / 2
+                  origin.y: delegateRoot.cardHeight - delegateRoot.hiddenTop
+                  xScale: s
+                  yScale: s
+                },
+                Translate { y: (1 - delegateRoot.reveal) * delegateRoot.tuckShift }
+              ]
+
+              Loader {
+                id: rowLoader
+                // ListView positions delegates; inset their content instead of the delegate itself.
+                x: Style.space(14)
+                y: -delegateRoot.hiddenTop
+                width: parent.width - Style.space(28)
+                sourceComponent: delegateRoot.modelData.kind === "header" ? headerDelegate : messageDelegate
+              }
             }
             Component {
               id: headerDelegate
@@ -687,8 +842,12 @@ Panel {
                 first: delegateRoot.modelData.first
                 last: delegateRoot.modelData.last
                 layered: delegateRoot.modelData.layered
+                tuckedCardsLive: list.hasTuckedCards(delegateRoot.modelData.group)
                 expanded: delegateRoot.modelData.expanded
                 groupCritical: delegateRoot.modelData.group.critical
+                groupEntries: delegateRoot.modelData.group.entries
+                accent: root.tintFor(delegateRoot.modelData.group)
+                settle: delegateRoot.reveal
                 language: root.language
                 now: root.now
                 showBody: root.showBody

@@ -58,6 +58,21 @@ PanelWindow {
   property bool popoutSwitchClosing: false
   property bool focusPrimed: false
 
+  // Slide the card in from the right screen edge instead of fading it.
+  property bool slideIn: false
+  // 0 is off the screen edge, 1 in place.
+  property real slideProgress: open || popoutSwitching ? 1 : 0
+  Behavior on slideProgress {
+    enabled: root.slideIn && !root.popoutSwitching && !root.popoutSwitchClosing
+    NumberAnimation {
+      duration: root.open ? 320 : 220
+      // cubic-bezier(0.8, 0, 0.2, 1); Qt takes the control points followed
+      // by the end point.
+      easing.type: Easing.BezierSpline
+      easing.bezierCurve: [0.8, 0, 0.2, 1, 1, 1]
+    }
+  }
+
   // Item that should take keyboard focus once the panel maps. Typically a
   // PanelKeyCatcher inside the panel content. Layer-shell grants focus to the
   // surface during the Exclusive prime, but Qt still needs an active-focus
@@ -84,7 +99,7 @@ PanelWindow {
   // --- screen + lifetime ---------------------------------------------------
 
   screen: anchorWindow ? anchorWindow.screen : null
-  visible: open || card.opacity > 0 || popoutSwitching
+  visible: open || popoutSwitching || (slideIn ? slideProgress > 0 : card.opacity > 0)
   color: "transparent"
   exclusionMode: ExclusionMode.Ignore
 
@@ -392,10 +407,13 @@ PanelWindow {
     borderSpec: root.borderSpec
     padding: root.padding
     radius: root.cornerRadius
-    opacity: root.open || root.popoutSwitching ? 1.0 : 0
+    opacity: root.slideIn || root.open || root.popoutSwitching ? 1.0 : 0
+    transform: Translate {
+      x: root.slideIn ? (1 - root.slideProgress) * (root.screenW - root.cardOrigin.x) : 0
+    }
 
     Behavior on opacity {
-      enabled: !root.popoutSwitching && !root.popoutSwitchClosing
+      enabled: !root.slideIn && !root.popoutSwitching && !root.popoutSwitchClosing
       NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
     }
 

@@ -118,7 +118,7 @@
         "max": 1200,
         "step": 20,
         "defaultValue": 0,
-        "description": "In the shell's spacing units, or 0 to let the list run to the bottom of the screen, which is where macOS ends its notification column and the reason 0 is the default. A number stops it sooner: a short list that scrolls, rather than a tall one that fills the display."
+        "description": "In the shell's spacing units, or 0 for a sheet that runs the full height of the screen, from under the bar to the bottom, which is the default. A number instead gives a card that grows with its notifications up to that height, then scrolls."
       }
     ]
   }

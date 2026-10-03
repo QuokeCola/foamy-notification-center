@@ -38,9 +38,20 @@ header and tighter message spacing. The default, `false`, keeps the roomier
 cards. Text and picture sizes stay unchanged. This setting is independent of
 Foamy Notifications, which defaults to compact popups.
 
-Cards use the same motion as Foamy popups: a 180 ms fade with an 8 px lift on
-arrival and a 120 ms fade on removal. The departed row then collapses over
-140 ms so remaining cards move smoothly. The panel height also animates.
+The center is a translucent sheet down the right edge of the screen, from
+under the bar to the bottom, and slides in and out from that edge. Opening,
+closing, folding, and unfolding all use `cubic-bezier(0.8, 0, 0.2, 1)`.
+
+Stacks fold the way macOS folds them: each card slides behind the front card,
+shrinking slightly, and settles on the stack edges drawn beneath it; unfolding
+brings the cards back out from behind it. Urgent notifications carry a line
+beside the card, tinted with the sending app's icon colour (or the theme's
+urgent colour for an icon without one), which tucks behind its card as the
+stack folds.
+
+New cards fade in with an 8 px lift over 180 ms and fade out over 120 ms on
+removal. The departed row then collapses over 140 ms so remaining cards move
+smoothly.
 Message updates retain their card, and scrolling does not replay the entrance.
 
 Keeps up to 1,000 notifications for 30 days by default. Silenced notifications
