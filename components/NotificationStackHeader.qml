@@ -42,7 +42,7 @@ Item {
   MouseArea {
     id: headingMouse
     anchors.fill: parent
-    anchors.rightMargin: dismiss.width + Style.space(8)
+    anchors.rightMargin: dismiss.width + (root.expandable ? fold.width : 0) + Style.space(8)
     cursorShape: root.expandable ? Qt.PointingHandCursor : Qt.ArrowCursor
     onClicked: { root.pointerUsed(); if (root.expandable) root.toggleRequested() }
   }
@@ -88,7 +88,7 @@ Item {
   }
   Row {
     id: metadata
-    anchors.right: dismiss.left
+    anchors.right: root.expandable ? fold.left : dismiss.left
     anchors.rightMargin: Style.space(5)
     anchors.verticalCenter: parent.verticalCenter
     spacing: Style.space(6)
@@ -107,6 +107,25 @@ Item {
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
     }
+  }
+  // Fold / unfold. Always shown on a stack, unlike the hover-only dismiss: it
+  // is how you find out a stack opens. The chevron turns to point up while
+  // the stack is open.
+  NotificationAction {
+    id: fold
+    visible: root.expandable
+    anchors.right: dismiss.left
+    anchors.rightMargin: Style.space(2)
+    anchors.verticalCenter: parent.verticalCenter
+    iconName: "chevron"
+    size: Style.space(26)
+    iconSize: Style.space(14)
+    focusable: false
+    foreground: root.foreground
+    rotation: root.expanded ? 180 : 0
+    Behavior on rotation { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+    tooltipText: Translations.text(root.expanded ? "Show less" : "Show all", root.language)
+    onClicked: { root.pointerUsed(); root.toggleRequested() }
   }
   NotificationAction {
     id: dismiss

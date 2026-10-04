@@ -287,9 +287,13 @@ Panel {
     if (removeOnly || cursorDismiss) {
       if (row.kind === "header") removeGroup(row.group)
       else remove(row.entry.key)
-    } else if (row.kind === "header") {
+    } else if (row.kind === "header" || isFolded(row)) {
       if (row.group.entries.length > 1) toggleGroup(row.group.key)
     } else activate(row.entry)
+  }
+
+  function isFolded(row) {
+    return !!row && row.kind === "message" && !row.expanded && row.group.entries.length > 1
   }
 
   onFilterChanged: rebuild()
@@ -893,7 +897,11 @@ Panel {
                 hasCursor: root.keyboardNavigation && root.cursorIndex === delegateRoot.index
                 dismissHasCursor: hasCursor && root.cursorDismiss
                 onPointerUsed: root.keyboardNavigation = false
-                onClicked: root.activate(entry)
+                // A folded stack's front card unfolds it; once open, each
+                // card acts on its own notification.
+                onClicked: root.isFolded(delegateRoot.modelData)
+                  ? root.toggleGroup(delegateRoot.modelData.group.key)
+                  : root.activate(entry)
                 onRemoveRequested: root.remove(entry.key)
               }
             }

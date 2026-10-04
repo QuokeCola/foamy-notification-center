@@ -42,7 +42,8 @@ Rectangle {
       bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/>',
       bellOff: '<path d="M9 3a6 6 0 0 1 9 5c0 2 .3 3.5.7 4.6M6 6C6 7 6 8 6 8c0 7-3 7-3 9h14M10 21h4M3 3l18 18"/>',
       trash: '<path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/>',
-      close: '<path d="m6 6 12 12M6 18 18 6"/>'
+      close: '<path d="m6 6 12 12M6 18 18 6"/>',
+      chevron: '<path d="m6 9 6 6 6-6"/>'
     })
     source: "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="' + Qt.rgba(ink.r, ink.g, ink.b, 1) + '" stroke-opacity="' + ink.a + '" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + paths[root.iconName] + '</svg>')
   }

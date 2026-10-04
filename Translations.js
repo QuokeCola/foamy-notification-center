@@ -17,6 +17,8 @@ var norwegian = {
   "Dismiss notification": "Fjern varsel",
   "Dismiss 1 notification": "Fjern 1 varsel",
   "Dismiss %1 notifications": "Fjern %1 varsler",
+  "Show all": "Vis alle",
+  "Show less": "Vis færre",
   "Reading the archive…": "Leser arkivet…",
   "Nothing matches “%1”": "Ingen treff for «%1»",
   "Nothing has come in yet": "Ingen varsler ennå",
