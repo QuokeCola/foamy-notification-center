@@ -83,7 +83,7 @@ Item {
       x: card.x + (card.width - width) / 2
       height: Style.space(30)
       y: root.cardHeight + peek - height
-      radius: Style.space(10) * s
+      radius: Math.min(Style.space(10), Style.cornerRadius) * s
       color: root.isUrgent(root.groupEntries[modelData]) ? root.urgentFill : root.cardFill
       border.width: 1
       border.color: Util.alpha(root.foreground, 0.18)
@@ -106,7 +106,7 @@ Item {
     HoverHandler { id: hover; onHoveredChanged: if (hovered) root.pointerUsed() }
     Rectangle {
       anchors.fill: parent
-      radius: Style.space(10)
+      radius: Math.min(Style.space(10), Style.cornerRadius)
       color: root.critical ? root.urgentFill : root.cardFill
       border.width: 1
       border.color: Util.alpha(root.foreground, 0.18)
@@ -118,7 +118,7 @@ Item {
       color: "transparent"
       border.width: root.hasCursor && !root.dismissHasCursor ? 1 : 0
       border.color: Color.accent
-      radius: Style.space(4)
+      radius: Math.min(Style.space(4), Style.cornerRadius)
     }
     MouseArea {
       anchors.fill: parent
@@ -201,7 +201,7 @@ Item {
       id: previewMask
       width: previewImage.width
       height: previewImage.height
-      radius: Style.space(8)
+      radius: Math.min(Style.space(8), Style.cornerRadius)
       color: "black"
       visible: false
       layer.enabled: true

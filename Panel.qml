@@ -649,7 +649,7 @@ Panel {
             anchors.verticalCenter: parent.verticalCenter
             width: root.searching ? actions.x - Style.space(20) : Style.space(32)
             height: Style.space(32)
-            radius: Style.space(7)
+            radius: Math.min(Style.space(7), Style.cornerRadius)
             color: root.searching ? Qt.alpha(root.foreground, 0.055) : "transparent"
             border.width: search.activeFocus ? 1 : 0
             border.color: Color.accent

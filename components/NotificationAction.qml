@@ -17,7 +17,7 @@ Rectangle {
 
   implicitWidth: size
   implicitHeight: size
-  radius: Style.space(7)
+  radius: Math.min(Style.space(7), Style.cornerRadius)
   color: highlighted ? Qt.alpha(hoverForeground, 0.08) : "transparent"
   opacity: enabled ? 1 : 0.4
   border.width: activeFocus ? 1 : 0
