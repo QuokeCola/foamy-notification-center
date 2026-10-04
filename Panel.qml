@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Controls as Controls
 import Quickshell
 import Quickshell.Io
+import Quickshell.Hyprland
 import qs.Commons
 import qs.Ui
 
@@ -89,6 +90,41 @@ Panel {
     target: root.store
     function onEntryAdded(entry) { root.handleEntryAdded(entry) }
     function onEntriesReset() { root.rebuild() }
+    function onSwipe(kind, progress, velocity) { root.followSwipe(kind, progress, velocity) }
+  }
+
+  // ------------------------------------------------------------------ swipe
+  //
+  // The store streams trackpad swipes (see bin/edge-swipe). "open" starts at
+  // the right edge with the panel shut; "close" is any rightward swipe while
+  // it is open. Progress is 1 for a full panel width along the swipe; the
+  // sheet tracks it and, on release, settles where the distance or the flick
+  // says. Only the panel on the focused monitor answers.
+  property string swipeKind: ""
+
+  function onFocusedScreen() {
+    var focused = Hyprland.focusedMonitor
+    return !!popup.screen && !!focused && focused.name === popup.screen.name
+  }
+
+  function followSwipe(kind, progress, velocity) {
+    if (kind === "begin-open") {
+      swipeKind = !root.opened && onFocusedScreen() ? "open" : ""
+    } else if (kind === "begin-close") {
+      swipeKind = root.opened && onFocusedScreen() ? "close" : ""
+    } else if (kind === "move") {
+      if (swipeKind === "open") popup.dragTo(progress)
+      else if (swipeKind === "close") popup.dragTo(1 - progress)
+    } else if (kind === "end" && swipeKind !== "") {
+      // Past a third of the way, or flicked, it goes; a flick back the other
+      // way cancels even past the halfway mark.
+      var go = velocity > 0.9 || (progress > 0.35 && velocity > -0.6)
+      var toOpen = swipeKind === "open" ? go : !go
+      swipeKind = ""
+      popup.release(toOpen)
+      if (toOpen && !root.opened) root.open()
+      else if (!toOpen && root.opened) root.close()
+    }
   }
 
   // -------------------------------------------------------------------- state

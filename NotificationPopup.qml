@@ -60,16 +60,91 @@ PanelWindow {
 
   // Slide the card in from the right screen edge instead of fading it.
   property bool slideIn: false
-  // 0 is off the screen edge, 1 in place.
-  property real slideProgress: open || popoutSwitching ? 1 : 0
-  Behavior on slideProgress {
-    enabled: root.slideIn && !root.popoutSwitching && !root.popoutSwitchClosing
-    NumberAnimation {
-      duration: root.open ? 320 : 220
-      // cubic-bezier(0.8, 0, 0.2, 1); Qt takes the control points followed
-      // by the end point.
-      easing.type: Easing.BezierSpline
-      easing.bezierCurve: [0.8, 0, 0.2, 1, 1, 1]
+  // 0 is off the screen edge, 1 in place. Past 1 the sheet is being pulled
+  // further out than it rests (a trackpad overswipe), drawn as a stretch.
+  // Driven imperatively rather than bound to `open`, so a trackpad swipe can
+  // hold it under the fingers and hand it to a spring when they lift.
+  property real slideProgress: 0
+  readonly property real slideTarget: open || popoutSwitching ? 1 : 0
+  property bool dragging: false
+  property bool gestureSettling: false
+
+  Component.onCompleted: slideProgress = slideTarget
+  onSlideTargetChanged: {
+    if (dragging || gestureSettling) return
+    slideSpring.stop()
+    slideCurve.stop()
+    slideAway.stop()
+    if (!slideIn || popoutSwitching || popoutSwitchClosing) { slideProgress = slideTarget; return }
+    slideCurve.to = slideTarget
+    slideCurve.duration = open ? 320 : 220
+    slideCurve.start()
+  }
+
+  NumberAnimation {
+    id: slideCurve
+    target: root
+    property: "slideProgress"
+    // cubic-bezier(0.8, 0, 0.2, 1); Qt takes the control points followed
+    // by the end point.
+    easing.type: Easing.BezierSpline
+    easing.bezierCurve: [0.8, 0, 0.2, 1, 1, 1]
+    onStopped: root.gestureSettling = false
+  }
+
+  // Settling shut after a swipe: the fingers were already moving, so no
+  // ease-in, just carry on and slow down.
+  NumberAnimation {
+    id: slideAway
+    target: root
+    property: "slideProgress"
+    to: 0
+    easing.type: Easing.OutCubic
+    onStopped: root.gestureSettling = false
+  }
+
+  // Settling open after a swipe: a spring, so a sheet let go short of home
+  // overshoots a touch and one pulled past it bounces back.
+  SpringAnimation {
+    id: slideSpring
+    target: root
+    property: "slideProgress"
+    spring: 4.5
+    damping: 0.34
+    epsilon: 0.0015
+    onStopped: root.gestureSettling = false
+  }
+
+  // Rubber band: past `1` the sheet follows the fingers with growing
+  // resistance and never travels more than `limit` further.
+  function rubberBand(p) {
+    if (p <= 1) return Math.max(0, p)
+    var limit = 0.14
+    return 1 + limit * (1 - 1 / ((p - 1) * 0.55 / limit + 1))
+  }
+
+  function dragTo(p) {
+    slideSpring.stop()
+    slideCurve.stop()
+    slideAway.stop()
+    dragging = true
+    slideProgress = rubberBand(p)
+  }
+
+  // Fingers lifted. The caller then opens or closes the owner; the animation
+  // started here carries the sheet the rest of the way.
+  function release(toOpen) {
+    dragging = false
+    gestureSettling = true
+    slideSpring.stop()
+    slideCurve.stop()
+    slideAway.stop()
+    if (toOpen) {
+      slideSpring.to = 1
+      slideSpring.start()
+    } else {
+      slideAway.duration = Math.max(120, 260 * Math.min(1, slideProgress))
+      slideAway.start()
     }
   }
 
@@ -401,7 +476,11 @@ PanelWindow {
     id: card
     x: root.cardOrigin.x
     y: root.cardOrigin.y
-    width: root.contentWidth
+    // An overswipe stretches the sheet leftward instead of lifting it off the
+    // screen edge: the card grows by the overshoot and the content keeps its
+    // width, pinned to the leading edge.
+    readonly property real stretch: root.slideIn ? Math.max(0, root.slideProgress - 1) * (root.screenW - root.cardOrigin.x) : 0
+    width: root.contentWidth + stretch
     height: root.contentHeight
     color: root.surfaceColor
     borderSpec: root.borderSpec
@@ -409,7 +488,7 @@ PanelWindow {
     radius: root.cornerRadius
     opacity: root.slideIn || root.open || root.popoutSwitching ? 1.0 : 0
     transform: Translate {
-      x: root.slideIn ? (1 - root.slideProgress) * (root.screenW - root.cardOrigin.x) : 0
+      x: root.slideIn ? (1 - Math.min(1, root.slideProgress)) * (root.screenW - root.cardOrigin.x) - card.stretch : 0
     }
 
     Behavior on opacity {
@@ -428,7 +507,7 @@ PanelWindow {
       id: contentHolder
       anchors.fill: parent
       anchors.topMargin: card.contentTopInset
-      anchors.rightMargin: card.contentRightInset
+      anchors.rightMargin: card.contentRightInset + card.stretch
       anchors.bottomMargin: card.contentBottomInset
       anchors.leftMargin: card.contentLeftInset
       opacity: root.popoutSwitching ? (root.open ? 1.0 : 0) : 1.0

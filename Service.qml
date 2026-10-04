@@ -380,6 +380,12 @@ Item {
   IpcHandler {
     target: "foamy.notification-center.test"
 
+    // Feed a fake trackpad swipe frame, as bin/edge-swipe would.
+    function swipe(kind: string, progress: real, velocity: real): string {
+      root.swipe(kind, progress, velocity)
+      return "ok"
+    }
+
     function seed(count: int): string {
       Quickshell.execDetached(root.storeCommand(["seed", String(count > 0 ? count : 25)]))
       reloadAfterSeed.restart()
@@ -421,5 +427,38 @@ Item {
     id: reloadAfterSeed
     interval: 600
     onTriggered: root.load()
+  }
+
+  // ---------------------------------------------------------------- swipes
+  //
+  // Two fingers in from the right edge of the trackpad pull the panel open;
+  // two fingers to the right push it shut. bin/edge-swipe reads the touchpad
+  // and streams the gesture one line per frame; every Panel listens and the
+  // one on the focused monitor follows it. Lives here so there is one reader,
+  // not one per bar.
+  signal swipe(string kind, real progress, real velocity)
+
+  readonly property string swipeScript:
+    Qt.resolvedUrl("bin/edge-swipe").toString().replace(/^file:\/\//, "")
+
+  Process {
+    id: swipeProc
+    command: [root.swipeScript]
+    running: true
+    stdout: SplitParser {
+      onRead: function(line) {
+        var f = String(line).split(" ")
+        if (f[0] === "begin") root.swipe("begin-" + f[1], 0, 0)
+        else if (f[0] === "move") root.swipe("move", Number(f[1]), 0)
+        else if (f[0] === "end") root.swipe("end", Number(f[1]), Number(f[2]))
+      }
+    }
+    onExited: swipeRestart.restart()
+  }
+
+  Timer {
+    id: swipeRestart
+    interval: 3000
+    onTriggered: swipeProc.running = true
   }
 }
