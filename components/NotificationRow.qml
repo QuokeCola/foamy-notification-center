@@ -39,6 +39,10 @@ Item {
   // what is under them: the theme's popup colour, without its alpha.
   readonly property color cardFill: Qt.rgba(Color.popups.background.r, Color.popups.background.g, Color.popups.background.b, 1)
   readonly property color urgentFill: Qt.tint(cardFill, Util.alpha(accent, 0.14))
+  // Card outlines, likewise opaque: the 18% foreground line pre-blended onto
+  // the fill it borders. Folding tucks every card past the second into the
+  // same place, and translucent outlines there would add up to a white edge.
+  function outline(fill) { return Qt.tint(fill, Util.alpha(root.foreground, 0.18)) }
   function isUrgent(entry) { return !!entry && Number(entry.urgency) === 2 }
   // How far this card is out of its stack: 1 laid out, 0 tucked behind the
   // front card. Panel.qml drives it while a stack folds or unfolds.
@@ -86,7 +90,7 @@ Item {
       radius: Math.min(Style.space(10), Style.cornerRadius) * s
       color: root.isUrgent(root.groupEntries[modelData]) ? root.urgentFill : root.cardFill
       border.width: 1
-      border.color: Util.alpha(root.foreground, 0.18)
+      border.color: root.outline(color)
     }
   }
   Rectangle {
@@ -109,7 +113,7 @@ Item {
       radius: Math.min(Style.space(10), Style.cornerRadius)
       color: root.critical ? root.urgentFill : root.cardFill
       border.width: 1
-      border.color: Util.alpha(root.foreground, 0.18)
+      border.color: root.outline(color)
       Behavior on color { ColorAnimation { duration: 300; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.8, 0, 0.2, 1, 1, 1] } }
     }
     Rectangle {
