@@ -127,6 +127,58 @@ Panel {
     }
   }
 
+  // ----------------------------------------------------------------- overview
+  //
+  // Swiping Aerial's overview up while the sheet is out slides the sheet off
+  // the edge under the same fingers, and back if the swipe is let go short;
+  // once the overview has opened, the center closes. Opened from a key, the
+  // overview takes the sheet with it on a curve of its own. Opened while the
+  // overview is already up, the sheet stays on top of it. See the store.
+  property bool aboveOverview: false
+  property real overviewYield: 0
+  readonly property real overviewFingers: store ? store.overviewFingers : -1
+  readonly property bool overviewShowing: store ? store.overviewShowing : false
+
+  function settleYield(target) {
+    yieldSettle.stop()
+    yieldSettle.to = target
+    yieldSettle.duration = Math.max(120, 300 * Math.abs(target - overviewYield))
+    yieldSettle.start()
+  }
+
+  NumberAnimation {
+    id: yieldSettle
+    target: root
+    property: "overviewYield"
+    easing.type: Easing.OutCubic
+  }
+
+  onOverviewFingersChanged: {
+    if (overviewFingers < 0 || aboveOverview) return
+    yieldSettle.stop()
+    overviewYield = overviewFingers
+  }
+
+  onOverviewShowingChanged: {
+    if (overviewShowing) {
+      // From a key: no fingers to follow.
+      if (!aboveOverview && overviewFingers < 0) settleYield(1)
+    } else {
+      aboveOverview = false
+      settleYield(0)
+    }
+  }
+
+  Connections {
+    target: root.store
+    function onOverviewLanding(opening) {
+      if (!root.aboveOverview) root.settleYield(opening ? 1 : 0)
+    }
+    function onOverviewStateChanged() {
+      if (root.store.overviewOpen && root.opened && !root.aboveOverview) root.close()
+    }
+  }
+
   // -------------------------------------------------------------------- state
 
   readonly property var entries: store ? store.entries : []
@@ -339,6 +391,9 @@ Panel {
       search.text = ""
       return
     }
+    // Opened over the overview, the sheet belongs on top of it.
+    aboveOverview = overviewShowing
+    if (aboveOverview) { yieldSettle.stop(); overviewYield = 0 }
     now = Date.now()
     keyboardNavigation = false
     cursorIndex = -1
@@ -465,6 +520,7 @@ Panel {
     bar: root.bar
     owner: root
     open: root.opened
+    yieldTo: root.overviewYield
     focusTarget: keyCatcher
     padding: 0
     // A sheet along the screen edge: square, flush with the bar, the side

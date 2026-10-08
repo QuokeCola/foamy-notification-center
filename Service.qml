@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import Quickshell.Hyprland
 import "." as Plugin
 import "Model.js" as Model
 
@@ -427,6 +428,56 @@ Item {
     id: reloadAfterSeed
     interval: 600
     onTriggered: root.load()
+  }
+
+  // -------------------------------------------------------------- overview
+  //
+  // Aerial's window overview, when it is installed, heard about the way any
+  // plugin may: on Hyprland's event socket, since plugins cannot reach each
+  // other's services. Its three- and four-finger swipes go out there as
+  // `aerial,up-move:<progress>` already, and it says when it changes state
+  // (`aerial-state,hidden|sliding|showing|open`), which covers it being
+  // opened from a key. Nothing arrives without it, and nothing here changes.
+  //
+  // `overviewFingers` is how far up the fingers have pulled it, 0 to 1, or -1
+  // when no swipe is under way; `overviewLanding` is where a swipe just let
+  // go is headed, judged the way Aerial judges it.
+  property string overviewState: "hidden"
+  property real overviewFingers: -1
+  readonly property bool overviewShowing: overviewState === "showing" || overviewState === "open"
+  readonly property bool overviewOpen: overviewState === "open"
+  signal overviewLanding(bool opening)
+
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) {
+      if (event.name !== "custom") return
+      var data = String(event.data || "")
+      if (data.indexOf("aerial-state,") === 0) {
+        root.overviewState = data.slice(13)
+        // Put away however it went, lift heard or not.
+        if (root.overviewState === "hidden") root.overviewFingers = -1
+        return
+      }
+      if (data.indexOf("aerial,") !== 0) return
+      var parts = data.slice(7).split(":")
+      var what = parts[0]
+      if (what !== "up-begin" && what !== "up-move" && what !== "up-end"
+          && what !== "allup-begin" && what !== "allup-move" && what !== "allup-end") return
+      // Swiping up on an open overview only stretches it.
+      if (root.overviewOpen) return
+      var progress = Math.max(0, Math.min(1, Number(parts[1]) || 0))
+      if (what.slice(-6) === "-begin") root.overviewFingers = 0
+      else if (what.slice(-5) === "-move") root.overviewFingers = progress
+      else {
+        // Aerial's rule: past half way, or flicked at least a little way.
+        var speed = Number(parts[2]) || 0
+        var cancelled = parts[3] === "1"
+        var opening = cancelled ? progress > 0.5 : (progress > 0.5 || (speed >= 2.0 && progress >= 0.08))
+        root.overviewFingers = -1
+        root.overviewLanding(opening)
+      }
+    }
   }
 
   // ---------------------------------------------------------------- swipes

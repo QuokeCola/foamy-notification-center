@@ -68,6 +68,10 @@ PanelWindow {
   readonly property real slideTarget: open || popoutSwitching ? 1 : 0
   property bool dragging: false
   property bool gestureSettling: false
+  // How far the sheet has stepped aside for something drawn over its screen,
+  // 0 to 1, on top of wherever `slideProgress` has it. Set by the owner.
+  property real yieldTo: 0
+  readonly property real shownProgress: slideProgress * (1 - Math.max(0, Math.min(1, yieldTo)))
 
   Component.onCompleted: slideProgress = slideTarget
   onSlideTargetChanged: {
@@ -174,7 +178,10 @@ PanelWindow {
   // --- screen + lifetime ---------------------------------------------------
 
   screen: anchorWindow ? anchorWindow.screen : null
-  visible: open || popoutSwitching || (slideIn ? slideProgress > 0 : card.opacity > 0)
+  // Not while it has stepped all the way aside: an open sheet with nothing
+  // on screen must not keep a full-screen surface catching the pointer.
+  visible: slideIn ? (open || popoutSwitching || slideProgress > 0) && yieldTo < 1
+                   : (open || popoutSwitching || card.opacity > 0)
   color: "transparent"
   exclusionMode: ExclusionMode.Ignore
 
@@ -479,7 +486,7 @@ PanelWindow {
     // An overswipe stretches the sheet leftward instead of lifting it off the
     // screen edge: the card grows by the overshoot and the content keeps its
     // width, pinned to the leading edge.
-    readonly property real stretch: root.slideIn ? Math.max(0, root.slideProgress - 1) * (root.screenW - root.cardOrigin.x) : 0
+    readonly property real stretch: root.slideIn ? Math.max(0, root.shownProgress - 1) * (root.screenW - root.cardOrigin.x) : 0
     width: root.contentWidth + stretch
     height: root.contentHeight
     color: root.surfaceColor
@@ -488,7 +495,7 @@ PanelWindow {
     radius: root.cornerRadius
     opacity: root.slideIn || root.open || root.popoutSwitching ? 1.0 : 0
     transform: Translate {
-      x: root.slideIn ? (1 - Math.min(1, root.slideProgress)) * (root.screenW - root.cardOrigin.x) - card.stretch : 0
+      x: root.slideIn ? (1 - Math.min(1, root.shownProgress)) * (root.screenW - root.cardOrigin.x) - card.stretch : 0
     }
 
     Behavior on opacity {
