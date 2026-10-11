@@ -118,12 +118,23 @@ Message updates retain their card, and scrolling does not replay the entrance.
 Keeps up to 1,000 notifications for 30 days by default. Silenced notifications
 remain in history; stock Omarchy exceptions still apply.
 
-The default `clickAction: "Auto"` opens only an absolute PNG, JPEG, GIF, or WebP
-path extracted from the notification action; otherwise it tries the live default
-action through Foamy Notifications, then falls back to focusing the sending app. Sender commands (`exec` and `execArgv`) are never replayed or kept in the
-archive. Existing archived commands are removed on the next sync.
-Set `clickAction` to `"Focus the app"` to skip pictures and live actions, or `"Nothing"` to disable
-notification body clicks. Closed app callbacks and URL actions cannot be replayed.
+The default `clickAction: "Auto"` first tries the current popup action through
+Foamy Notifications. If that action is unavailable, it opens an absolute PNG,
+JPEG, GIF, or WebP path, or focuses the sending app when no image is available.
+The standard two-argument `tensaku-edit` screenshot action becomes a fixed
+`edit-screenshot` intent, so screenshots still open in Tensaku after expiry or
+reload. Other images open with `xdg-open`. Missing files, unavailable apps, or immediate launch failures leave
+the entry available for retry.
+
+Sender commands (`exec` and `execArgv`) are never replayed or kept in the archive.
+Custom screenshot editors work while their popup action is live; after expiry,
+they use the image viewer. Existing archived commands are removed on the next
+sync. Previously disarmed entries gain screenshot editing only when their
+original notification source still exists; the editor cannot be inferred from
+an image path alone.
+Set `clickAction` to `"Focus the app"` to skip pictures and live actions, or
+`"Nothing"` to disable notification body clicks. Closed app callbacks and URL
+actions cannot be replayed.
 
 When used with Foamy Notifications, activating a popup removes it from this center
 and clears its unread state. Dismissing the popup with × or right-click keeps it

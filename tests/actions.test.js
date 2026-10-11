@@ -13,8 +13,8 @@ const activate = panel.slice(start, panel.indexOf("\n  }", start) + 4)
 
 function view(mode = "Auto") {
   const state = vm.createContext({
-    clickAction: mode, Model, store: { focusNotification(row) { state.focusProc.running = true; state.focusProc.row = row } }, omarchyPath: "/omarchy", focusProc: {},
-    actions: [], images: [], removed: [], closed: 0,
+    clickAction: mode, Model, store: { focusNotification(row) { state.focusProc.running = true; state.focusProc.row = row; state.delegated.push(row) } }, omarchyPath: "/omarchy", focusProc: {},
+    actions: [], images: [], delegated: [], removed: [], closed: 0,
     Util: { execArgv(argv) { state.actions.push(argv) } },
     Quickshell: { execDetached(argv) { state.images.push(argv) } },
     remove(key) { state.removed.push(key) }, close() { state.closed++ }
@@ -47,7 +47,7 @@ function assertDisarmed(entries) {
   }
 }
 
-test("sync discards sender commands from live and historical notifications; stacked clicks only open image paths", t => {
+test("sync discards sender commands from live and historical notifications; stacked clicks delegate the selected image", t => {
   const f = fixture(t)
   const timestamp = Date.now()
   const files = ["/tmp/a picture.png", "/tmp/another picture.JPEG"]
@@ -69,9 +69,10 @@ test("sync discards sender commands from live and historical notifications; stac
   const expanded = Model.stackRows(entries, { Actions: true }, "").filter(row => row.kind === "message")
   state.activate(expanded[1].entry)
   assert.equal(state.actions.length, 0)
-  assert.deepEqual(state.images.map(argv => Array.from(argv)), [["xdg-open", files[1]], ["xdg-open", files[0]]])
-  assert.deepEqual(Array.from(state.removed), [collapsed[0].entry.key, expanded[1].entry.key])
-  assert.equal(state.closed, 2)
+  assert.deepEqual(Array.from(state.delegated, row => row.file), [files[1], files[0]])
+  assert.equal(state.images.length, 0)
+  assert.equal(state.removed.length, 0)
+  assert.equal(state.closed, 0)
 })
 
 test("sync and backfill strip both command fields from old archives and retain only image paths", t => {
@@ -138,10 +139,10 @@ test("only absolute raster paths can reach the fixed opener; click settings stil
     const row = { key: "100-1", app: "Browser", file, execArgv: '["bash", "-c", "command"]' }
     const auto = view()
     auto.activate(row)
-    assert.deepEqual(Array.from(auto.images[0]), ["xdg-open", file])
-    assert.equal(auto.actions.length, 0)
-    assert.deepEqual(Array.from(auto.removed), ["100-1"])
-    assert.equal(auto.closed, 1)
+    assert.equal(auto.focusProc.row, row)
+    assert.deepEqual(Model.fileCommand(row), ["xdg-open", file])
+    assert.equal(auto.actions.length + auto.images.length + auto.removed.length, 0)
+    assert.equal(auto.closed, 0)
     const focus = view("Focus the app")
     focus.activate(row)
     assert.equal(focus.actions.length + focus.images.length, 0)
@@ -164,8 +165,8 @@ test('Center delegates default action and browser focus without replaying archiv
 
 const serviceSource = fs.readFileSync(path.join(__dirname, "../Service.qml"), "utf8")
 function focusService() {
- const state=vm.createContext({focusProc:{running:false},focusEntry:null,focusError:"",invokingDefault:false,
-  Qt:{resolvedUrl(){return "file:///plugin/bin/focus-notification-app"}},omarchyPath:"/omarchy",removed:[],completed:0,console,
+ const state=vm.createContext({focusProc:{running:false},focusEntry:null,focusError:"",invokingDefault:false,openingFile:false,Model,
+  Qt:{resolvedUrl(path){return "file:///plugin/"+path}},omarchyPath:"/omarchy",removed:[],completed:0,console,
   remove(key){state.removed.push(key)},focusCompleted(){state.completed++}})
  state.root=state
  for(const name of ["focusNotification","focusSendingApp","finishFocus"]) {
@@ -226,3 +227,67 @@ test("invalid app identity cannot become a stock focus regex",()=>{
  assert.equal(run(clients),0)
  assert.equal(run(clients,{FOCUS_CODE:"1"}),1)
  })
+
+
+test("live image actions win; expired screenshots use Tensaku and other pictures use the viewer", () => {
+ for (const [fileAction, program] of [["edit-screenshot", "tensaku-edit"], ["", "xdg-open"], ["arbitrary command", "xdg-open"]]) {
+  const row = {key:"100-1",app:"omarchy-action",file:"/tmp/image with spaces.png",fileAction,execArgv:'["unsafe"]'}
+  const live = focusService(); live.focusNotification(row)
+  live.focusProc.running=false; live.finishFocus(0,0,"invoked")
+  assert.equal(live.completed,1); assert.equal(live.removed.length,0)
+  const expired = focusService(); expired.focusNotification(row)
+  expired.focusProc.running=false; expired.finishFocus(0,0,"unavailable")
+  assert.deepEqual(Array.from(expired.focusProc.command),["bash","/plugin/bin/open-notification-image",program==="tensaku-edit"?"edit-screenshot":"view-image",row.file])
+  assert.equal(expired.removed.length,0)
+  expired.focusProc.running=false; expired.finishFocus(0,0,"")
+  assert.deepEqual(Array.from(expired.removed),[row.key]); assert.equal(expired.completed,1)
+ }
+})
+test("failed image open retains history for retry, including exit code 3", () => {
+ for(const code of [1,3,127]) {
+  const state=focusService(); state.focusNotification({key:"100-1",app:"omarchy-action",file:"/tmp/a.png",fileAction:"edit-screenshot"})
+  state.focusProc.running=false; state.finishFocus(1,0,"")
+  assert.deepEqual(Array.from(state.focusProc.command),["bash","/plugin/bin/open-notification-image","edit-screenshot","/tmp/a.png"])
+  state.focusProc.running=false; state.finishFocus(code,0,"")
+  assert.equal(state.removed.length,0); assert.equal(state.completed,0); assert.match(state.focusError,/Could not open the image/)
+ }
+})
+test("only a two-argument Tensaku image action survives as a fixed intent, including migration", t => {
+ const f=fixture(t),timestamp=Date.now(),file="/tmp/screenshot with spaces.png"
+ const commands=[["tensaku-edit",file],["/usr/bin/tensaku-edit",file],["tensaku-edit",file,"extra"],["/tmp/tensaku-edit",file],["bash","-c","tensaku-edit",file],["other-editor",file],["tensaku-edit","/tmp/a.desktop"]]
+ for(let i=0;i<commands.length;i++) fs.writeFileSync(path.join(f.source,`${timestamp}-${i}.json`),JSON.stringify({timestamp,app:"omarchy-action",execArgv:JSON.stringify(commands[i])}))
+ f.run("sync")
+ let rows=f.run("list"),byKey=new Map(rows.map(row=>[row.key,row]))
+ assertDisarmed(rows)
+ assert.deepEqual(commands.map((_,i)=>byKey.get(`${timestamp}-${i}`).fileAction),["edit-screenshot","edit-screenshot","","","","",""])
+ // Upgrading an unchanged source must add the intent without requiring a new notification.
+ fs.writeFileSync(f.archive,rows.map(({fileAction,...row})=>JSON.stringify(row)).join("\n")+"\n")
+ f.run("sync"); assert.equal(f.run("list").filter(row=>row.fileAction==="edit-screenshot").length,2)
+ // An old archive with argv migrates, while an already disarmed archive cannot guess the editor.
+ fs.writeFileSync(f.archive,JSON.stringify({key:`${timestamp}-99`,timestamp,execArgv:JSON.stringify(commands[0])})+"\n")
+ f.run("backfill"); rows=f.run("list"); assertDisarmed(rows)
+ assert.equal(rows[0].fileAction,"edit-screenshot"); assert.deepEqual(Model.fileCommand(rows[0]),["tensaku-edit",file])
+})
+
+test("fixed image launcher preserves spaces, rejects unsafe paths and reports startup failures without waiting for the editor", t => {
+ const temp=fs.mkdtempSync(path.join(os.tmpdir(),"notification-image-open-"))
+ t.after(()=>fs.rmSync(temp,{recursive:true,force:true}))
+ const file=path.join(temp,"a picture.png"),marker=path.join(temp,"opened")
+ fs.writeFileSync(file,"fixture")
+ for(const program of ["tensaku-edit","xdg-open"]) fs.writeFileSync(path.join(temp,program),'#!/bin/bash\nprintf "%s" "$1" > "$MARKER"\nexit "${OPEN_CODE:-0}"\n',{mode:0o755})
+ const helper=path.join(__dirname,"../bin/open-notification-image")
+ const run=(intent,image,extra={})=>spawnSync("/usr/bin/bash",[helper,intent,image],{env:{...process.env,PATH:temp+":"+process.env.PATH,MARKER:marker,...extra},encoding:"utf8",timeout:2000})
+ for(const intent of ["edit-screenshot","view-image"]) {
+  assert.equal(run(intent,file).status,0);assert.equal(fs.readFileSync(marker,"utf8"),file)
+  assert.equal(run(intent,file,{OPEN_CODE:"3"}).status,3)
+ }
+ for(const invalid of ["-option.png","/tmp/a.png\n","/tmp/a.desktop","/tmp/a.svg","https://example.test/a.png"]) assert.equal(run("edit-screenshot",invalid).status,2)
+ assert.equal(run("edit-screenshot",path.join(temp,"missing.png")).status,4)
+ assert.equal(run("arbitrary-command",file).status,2)
+ const unavailable=path.join(temp,"unavailable");fs.mkdirSync(unavailable)
+ fs.symlinkSync("/usr/bin/jq",path.join(unavailable,"jq"))
+ assert.equal(run("edit-screenshot",file,{PATH:unavailable}).status,127)
+ // A long-lived editor must not hold the center's process or output pipes open.
+ fs.writeFileSync(path.join(temp,"tensaku-edit"),'#!/bin/bash\nprintf "%s" "$1" > "$MARKER"\nsleep 1\n',{mode:0o755})
+ const start=Date.now();assert.equal(run("edit-screenshot",file).status,0);assert.ok(Date.now()-start<700)
+})

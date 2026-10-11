@@ -364,13 +364,6 @@ Panel {
 
   function activate(row) {
     if (!row || clickAction === "Nothing") return
-    // Ignore sender commands even before an old archive has been migrated.
-    if (clickAction === "Auto" && Model.isPreviewFile(row.file)) {
-      Quickshell.execDetached(["xdg-open", row.file])
-      root.remove(row.key)
-      root.close()
-      return
-    }
     if (store) store.focusNotification(row, clickAction === "Auto")
   }
 

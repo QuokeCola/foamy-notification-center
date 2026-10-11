@@ -67,12 +67,14 @@ Item {
   property string focusError: ""
   property var focusEntry: null
   property bool invokingDefault: false
+  property bool openingFile: false
   signal focusCompleted()
 
   function focusNotification(row, useDefault) {
     if (focusProc.running || !row || !/^[0-9]+-[0-9]+$/.test(String(row.key))) return
     focusError = ""
     focusEntry = row
+    openingFile = false
     if (useDefault === false) { focusSendingApp(); return }
     invokingDefault = true
     // Probe the running daemon, not an installed plugin that may be disabled.
@@ -104,8 +106,15 @@ Item {
         return
       }
       if (!succeeded || result !== "invoked") {
-        // Stock/older daemons and expired callbacks all use the stock fallback.
-        focusSendingApp()
+        // Live sender actions take priority; archived pictures use a fixed opener.
+        var command = Model.fileCommand(focusEntry)
+        if (command) {
+          invokingDefault = false
+          openingFile = true
+          var helper = decodeURIComponent(Qt.resolvedUrl("bin/open-notification-image").toString().replace(/^file:\/\//, ""))
+          focusProc.command = ["bash", helper, command[0] === "tensaku-edit" ? "edit-screenshot" : "view-image", command[1]]
+          focusProc.running = true
+        } else focusSendingApp()
         return
       }
       // The daemon owns durable handling of its callback and acknowledges removal.
@@ -114,12 +123,13 @@ Item {
       return
     }
     if (succeeded) { root.remove(focusEntry.key); root.focusCompleted() }
-    else if (exitCode === 3 && exitStatus === 0) {
+    else if (!openingFile && exitCode === 3 && exitStatus === 0) {
       // Background senders often have no window; retain history without an error.
       focusError = ""
     } else {
-      focusError = "Could not focus the sending app. Open the app and try again."
-      console.warn("Notification focus failed:", exitCode, exitStatus)
+      focusError = openingFile ? "Could not open the image. Check that the file and its app are available, then try again."
+                              : "Could not focus the sending app. Open the app and try again."
+      console.warn(openingFile ? "Notification image opening failed:" : "Notification focus failed:", exitCode, exitStatus)
     }
     focusEntry = null
   }

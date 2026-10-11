@@ -7,6 +7,12 @@ function isPreviewFile(value) {
     && /^\/[^"'\x00-\x1f\x7f]*\.(jpe?g|png|webp|gif)$/i.test(value)
 }
 
+// Persist only a fixed image-editor intent; never execute an archived argv vector.
+function fileCommand(row) {
+  if (!row || !isPreviewFile(row.file)) return null
+  return [row.fileAction === "edit-screenshot" ? "tensaku-edit" : "xdg-open", row.file]
+}
+
 function unreadState(entries, lastSeen) {
   var rows = Array.isArray(entries) ? entries : []
   var boundary = Number(lastSeen)
@@ -105,6 +111,7 @@ function stackRows(entries, expanded, filter, browserGrouping, identity) {
 if (typeof module !== "undefined") {
   module.exports = {
     isPreviewFile: isPreviewFile,
+    fileCommand: fileCommand,
     CRITICAL_URGENCY: CRITICAL_URGENCY,
     unreadState: unreadState,
     relativeTime: relativeTime,
