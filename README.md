@@ -9,13 +9,21 @@ Notification history with app stacks, search, and do not disturb.
 Requires Omarchy Quattro with stock notifications or Foamy Notifications enabled, `jq`, `wl-paste`, and GNU `timeout`, plus
 `inotify-tools`. Website favicon lookup uses the system Python 3 runtime.
 
-Picture previews also require `file` and ImageMagick 7 (`magick`). PNG, JPEG,
-GIF, and WebP previews are converted to a single PNG of at most 720 × 720 pixels.
+File-backed app icons, attached images, and picture previews require `file` and
+ImageMagick 7 (`magick`). PNG, JPEG (including progressive JPEG), GIF, and WebP
+files are converted outside the shell to a single PNG of at most 720 × 720 pixels.
+BMP/ICO and self-contained SVG app icons and attached images are also supported.
+SVG uses librsvg through ImageMagick in an empty working directory; external
+resources are unavailable. Transparency and aspect ratio are preserved; themed
+app icons still resolve normally.
 Conversion uses a plugin-local policy: no delegates or disk pixel cache, an
 8,192-pixel width/height limit, a 128 MiB pixel cache, a 512 MiB process memory
 limit, and a five-second timeout (forced termination after one further second).
-Unsupported, oversized, or failed previews are discarded; notification text is
-still archived. Missing preview tools also leave notifications without previews.
+Unsupported, oversized, or failed images are omitted; notification text remains
+archived and app icons fall back to the app glyph. Missing conversion tools also
+omit file-backed images rather than exposing originals to the shell. Existing
+archived images are normalized before the first read, even when their sender
+files have disappeared. Opening a picture still uses its original file.
 
 ```sh
 omarchy plugin add https://github.com/foamrider/foamy-notification-center.git --enable

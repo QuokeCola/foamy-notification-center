@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <policymap>
-  <!-- Bound each preview decode; never spill its pixel cache to disk. -->
+  <!-- Bound each archived image decode; never spill its pixel cache to disk. -->
   <policy domain="resource" name="memory" value="128MiB"/>
   <policy domain="resource" name="map" value="0"/>
   <policy domain="resource" name="disk" value="0"/>
@@ -14,8 +14,8 @@
   <policy domain="filter" rights="none" pattern="*"/>
   <policy domain="path" rights="none" pattern="@*"/>
   <policy domain="module" rights="none" pattern="*"/>
-  <policy domain="module" rights="read | write" pattern="{PNG,JPEG,GIF,WEBP}"/>
+  <policy domain="module" rights="read | write" pattern="{PNG,JPEG,GIF,WEBP,BMP,ICON,SVG}"/>
   <policy domain="coder" rights="none" pattern="*"/>
-  <policy domain="coder" rights="read" pattern="{JPEG,GIF,WEBP}"/>
+  <policy domain="coder" rights="read" pattern="{JPEG,GIF,WEBP,BMP,ICO,RSVG}"/>
   <policy domain="coder" rights="read | write" pattern="PNG"/>
 </policymap>
