@@ -18,6 +18,7 @@ var norwegian = {
   "Keep notifications (days)": "Behold varsler (dager)",
   "Maximum notifications": "Maks antall varsler",
   "Group duplicate notifications": "Grupper like varsler",
+  "X removes from history": "X fjerner fra historikken",
   "Normal notification duration (seconds)": "Visningstid for vanlige varsler (sekunder)",
   "Browser": "Nettleser",
   "Hostname": "Vertsnavn",

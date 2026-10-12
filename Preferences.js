@@ -12,6 +12,7 @@ var popupFields = [
   {key:"useBrowserFavicons",type:"boolean",label:"Use website favicons",defaultValue:true},
   {key:"compact",type:"boolean",label:"Compact view",defaultValue:true},
   {key:"showImages",type:"boolean",label:"Show pictures",defaultValue:true},
+  {key:"closeButtonRemovesHistory",type:"boolean",label:"X removes from history",defaultValue:false},
   {key:"normalTimeoutSec",type:"integer",label:"Normal notification duration (seconds)",defaultValue:8,min:1,max:120}
 ]
 function field(scope,key) {

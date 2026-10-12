@@ -45,7 +45,10 @@ Settings use the same controls as Foamy Bolt and Audio. The **Notification
 Center** section changes this widget's browser grouping, favicons, compact view,
 pictures, retention (days), and maximum archive count. **Foamy Notifications**
 changes the enabled popup service's duplicate grouping, favicons, compact view,
-pictures, and normal duration (seconds). Hostname/browser stacks belong only to
+pictures, normal duration (seconds), and **X removes from history**. That option
+is off by default; when enabled, the popup's X button removes its whole duplicate
+group from history. Right-click still hides the popup and keeps its history.
+Hostname/browser stacks belong only to
 the center; popups group exact duplicates with matching actions.
 
 Changes save immediately to each plugin's own `shell.json` entry. Popup settings
@@ -137,8 +140,9 @@ Set `clickAction` to `"Focus the app"` to skip pictures and live actions, or
 actions cannot be replayed.
 
 When used with Foamy Notifications, activating a popup removes it from this center
-and clears its unread state. Dismissing the popup with × or right-click keeps it
-in history. The public `foamy.notification-center.store remove` IPC command accepts
+and clears its unread state. Right-click dismissal keeps it in history. × also
+keeps history unless `closeButtonRemovesHistory` is enabled on the
+`foamy.notifications` service entry. The public `foamy.notification-center.store remove` IPC command accepts
 comma-separated notification keys and performs a durable removal. The companion
 `handled` command only updates the in-memory list after a caller has already
 committed that removal; Foamy Notifications uses this to avoid a second archive

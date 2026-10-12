@@ -47,6 +47,20 @@ class PreferencesTest(unittest.TestCase):
         self.assertEqual(config["plugins"][1]["normalTimeoutSec"], 12)
         self.assertTrue(config["bar"]["layout"]["right"][0]["compact"])
 
+    def test_close_button_option_defaults_off_and_saves_only_to_popup_service(self):
+        self.assertFalse(preferences.settings(self.config, self.config["plugins"][1])["settings"]["closeButtonRemovesHistory"])
+        for value in [True, False]:
+            result = preferences.save(self.path, "closeButtonRemovesHistory", value)
+            expected = json.loads(json.dumps(self.config))
+            expected["plugins"][1]["closeButtonRemovesHistory"] = value
+            self.assertEqual(json.loads(self.source.read_text()), expected)
+            self.assertEqual(result["settings"]["closeButtonRemovesHistory"], value)
+        before = self.source.read_bytes()
+        for value in [1, "true", None]:
+            with self.assertRaises(ValueError):
+                preferences.save(self.path, "closeButtonRemovesHistory", value)
+        self.assertEqual(self.source.read_bytes(), before)
+
     def test_invalid_values_and_unknown_keys_do_not_write(self):
         before = self.source.read_bytes()
         for key, value in [("normalTimeoutSec", 0), ("normalTimeoutSec", True), ("normalTimeoutSec", 121), ("normalTimeoutSec", 1.5), ("compact", 1), ("compact", "false"), ("browserGrouping", "hostname")]:

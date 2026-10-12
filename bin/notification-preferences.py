@@ -9,7 +9,7 @@ import sys
 import tempfile
 
 FIELDS = {"groupDuplicates": True, "useBrowserFavicons": True, "compact": True,
-          "showImages": True, "normalTimeoutSec": 8}
+          "showImages": True, "closeButtonRemovesHistory": False, "normalTimeoutSec": 8}
 
 
 def valid(key, value):

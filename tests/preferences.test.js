@@ -18,3 +18,11 @@ test('units belong to translated labels', () => {
   assert.equal(T.text(P.field('center','keepDays').label,'nb'),'Behold varsler (dager)')
   assert.equal(T.text(P.field('popups','normalTimeoutSec').label,'nb'),'Visningstid for vanlige varsler (sekunder)')
 })
+test('X history removal is a translated popup setting with a strict boolean', () => {
+  assert.equal(P.value('popups',{},'closeButtonRemovesHistory'),false)
+  assert.equal(P.valid('popups','closeButtonRemovesHistory',true),true)
+  assert.equal(P.valid('popups','closeButtonRemovesHistory','true'),false)
+  assert.equal(P.valid('center','closeButtonRemovesHistory',true),false)
+  assert.deepEqual(P.saveCommand('popups','closeButtonRemovesHistory',true,'/helper'), ['python3','/helper','save','closeButtonRemovesHistory','true'])
+  assert.equal(T.text(P.field('popups','closeButtonRemovesHistory').label,'nb'),'X fjerner fra historikken')
+})
