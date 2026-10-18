@@ -812,18 +812,16 @@ Panel {
             // linear in this one value, so they can never drift apart.
             property real reveal: 1
             // Position within the stack: 0 is the front card (and headers).
-            readonly property int stackDepth: {
-              if (!modelData || modelData.kind !== "message") return 0
-              var entries = modelData.group.entries
-              for (var i = 0; i < entries.length; i++)
-                if (entries[i].key === modelData.entry.key) return i
-              return 0
-            }
+            readonly property int stackDepth: modelData && modelData.kind === "message"
+              ? modelData.depth || 0 : 0
             readonly property bool stacking: !!modelData && modelData.kind === "message"
               && list.stackingGroup !== "" && modelData.group.key === list.stackingGroup
             readonly property real cardHeight: rowLoader.item && rowLoader.item.cardHeight !== undefined
               ? rowLoader.item.cardHeight : rowLoader.implicitHeight
-            readonly property var front: stackDepth > 0
+            // Only looked up while the card is, or may start, moving: every
+            // other use is scaled by (1 - reveal). Keeps a row registering
+            // elsewhere in the list from re-evaluating every card.
+            readonly property var front: (stacking || reveal < 1) && stackDepth > 0
               ? list.liveRow("entry:" + modelData.group.entries[0].key) : null
             // Tucked geometry, shared with the folded edges NotificationRow
             // draws, so a card that finishes folding lands exactly on them.
@@ -938,7 +936,9 @@ Panel {
                 first: delegateRoot.modelData.first
                 last: delegateRoot.modelData.last
                 layered: delegateRoot.modelData.layered
-                tuckedCardsLive: list.hasTuckedCards(delegateRoot.modelData.group)
+                // Only the last card of a folded stack draws the edges.
+                tuckedCardsLive: delegateRoot.modelData.last && delegateRoot.modelData.layered
+                  && list.hasTuckedCards(delegateRoot.modelData.group)
                 expanded: delegateRoot.modelData.expanded
                 groupCritical: delegateRoot.modelData.group.critical
                 groupEntries: delegateRoot.modelData.group.entries

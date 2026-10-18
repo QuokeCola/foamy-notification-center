@@ -86,7 +86,7 @@ function stackRows(entries, expanded, filter) {
     for (var j = 0; j < visible.length; j++) {
       rows.push({ id: "entry:" + visible[j].key, kind: "message", group: group,
         entry: visible[j], expanded: open, first: j === 0, last: j === visible.length - 1,
-        layered: multiple && !open })
+        layered: multiple && !open, depth: j })
     }
   }
   return rows
