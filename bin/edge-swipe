@@ -126,10 +126,11 @@ def run(path):
         tracker = Tracker(*abs_range(fd, ABS_MT_POSITION_X))
         slots = {}  # slot -> [tracking_id, x, y]
         slot = 0
+        down = 0    # slots with a finger on the pad
         while True:
             data = os.read(fd, EVENT.size * 64)
-            for off in range(0, len(data) - EVENT.size + 1, EVENT.size):
-                sec, usec, etype, code, value = EVENT.unpack_from(data, off)
+            usable = len(data) - len(data) % EVENT.size
+            for sec, usec, etype, code, value in EVENT.iter_unpack(memoryview(data)[:usable]):
                 if etype == EV_ABS:
                     if code == ABS_MT_SLOT:
                         slot = value
@@ -137,11 +138,18 @@ def run(path):
                     s = slots.setdefault(slot, [-1, 0, 0])
                     if code == ABS_MT_TRACKING_ID:
                         s[0] = value
+                        # Recounted rather than stepped, so a SYN_DROPPED gap
+                        # can't leave the count off for good.
+                        down = sum(1 for t in slots.values() if t[0] != -1)
                     elif code == ABS_MT_POSITION_X:
                         s[1] = value
                     elif code == ABS_MT_POSITION_Y:
                         s[2] = value
                 elif etype == EV_SYN and code == SYN_REPORT:
+                    # Ordinary one-finger pointing: an idle tracker would only
+                    # reset itself, so skip building the frame at all.
+                    if down < 2 and tracker.state == "idle":
+                        continue
                     tracker.frame(sec + usec / 1e6, [s for s in slots.values() if s[0] != -1])
     finally:
         os.close(fd)
