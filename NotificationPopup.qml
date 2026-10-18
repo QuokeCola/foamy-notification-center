@@ -180,8 +180,11 @@ PanelWindow {
   screen: anchorWindow ? anchorWindow.screen : null
   // Not while it has stepped all the way aside: an open sheet with nothing
   // on screen must not keep a full-screen surface catching the pointer.
-  visible: slideIn ? (open || popoutSwitching || slideProgress > 0) && yieldTo < 1
-                   : (open || popoutSwitching || card.opacity > 0)
+  readonly property bool sheetShown: slideIn ? (open || popoutSwitching || slideProgress > 0) && yieldTo < 1
+                                           : (open || popoutSwitching || card.opacity > 0)
+  // A sliding sheet maps only after its dismissal surface, so it is created
+  // after it and stacks above it.
+  visible: sheetShown && (!slideIn || dismissSurface.visible)
   color: "transparent"
   exclusionMode: ExclusionMode.Ignore
 
@@ -209,12 +212,27 @@ PanelWindow {
   // the user can click another bar icon while the panel is open and the
   // activePopout coordinator swaps to that popup); everywhere else, the
   // overlay catches the click and dismisses via the MouseArea below.
+  //
+  // A sliding sheet is the exception: the compositor blurs this surface, and
+  // re-blurs all of it on every frame the sheet moves, so it spans only the
+  // strip down the right edge the sheet can reach, overswipe stretch
+  // included. Its input region is the card; everything else on the screen
+  // falls through to `dismissSurface` below it, which does the dismissing.
   anchors {
     top: true
     bottom: true
-    left: true
+    left: !slideIn
     right: true
   }
+  implicitWidth: slideIn ? stripWidth : screenW
+
+  // The furthest a sheet is ever drawn past its resting place, with room to
+  // spare: the rubber band stops short of 1.14, and the spring overshoots
+  // by under 0.05.
+  readonly property real maxShownProgress: 1.2
+  readonly property int stripWidth: Math.min(screenW, Math.ceil((maxShownProgress - 1) * (screenW - cardOrigin.x) + (screenW - cardOrigin.x)) + 1)
+  // Where this surface's left edge is on the screen.
+  readonly property real surfaceX: slideIn ? screenW - stripWidth : 0
 
   // Clickable region is the whole screen. Clicks in the bar strip are
   // forwarded to registered bar buttons so switching between panel icons
@@ -225,8 +243,10 @@ PanelWindow {
     return Math.max(bar.barSize, actual) + root.gap
   }
   mask: Region {
-    width: root.screenW
-    height: root.screenH
+    x: root.slideIn ? Math.floor(card.x + cardShift.x) : 0
+    y: root.slideIn ? card.y : 0
+    width: root.slideIn ? Math.ceil(card.width) + 1 : root.screenW
+    height: root.slideIn ? card.height : root.screenH
   }
 
   // Track every layout change between the bar's contentItem and the
@@ -380,63 +400,108 @@ PanelWindow {
   // own MouseArea below so clicks on it don't bubble up here. Disabled
   // during the fade-out so the dying overlay doesn't swallow clicks that
   // were meant for the apps behind it.
-  MouseArea {
-    id: dismissArea
-    anchors.fill: parent
-    enabled: root.open
-    acceptedButtons: Qt.AllButtons
-    hoverEnabled: true
-    property bool hoveringBar: false
-    cursorShape: hoveringBar ? Qt.PointingHandCursor : Qt.ArrowCursor
+  Component {
+    id: dismissAreaComponent
+    MouseArea {
+      anchors.fill: parent
+      enabled: root.open
+      acceptedButtons: Qt.AllButtons
+      hoverEnabled: true
+      property bool hoveringBar: false
+      cursorShape: hoveringBar ? Qt.PointingHandCursor : Qt.ArrowCursor
 
-    function inBarRegion(px, py) {
-      if (root.barPos === "bottom") return py >= root.screenH - root._barStripSize
-      if (root.barPos === "left") return px <= root._barStripSize
-      if (root.barPos === "right") return px >= root.screenW - root._barStripSize
-      return py <= root._barStripSize
-    }
-
-    function barPoint(px, py) {
-      if (root.barPos === "bottom") return Qt.point(px, py - (root.screenH - root.barH))
-      if (root.barPos === "right") return Qt.point(px - (root.screenW - root.barW), py)
-      return Qt.point(px, py)
-    }
-
-    function pressTargetAt(px, py) {
-      if (!root.anchorWindow || !root.anchorWindow.contentItem || !root.bar || !root.bar.clickTargets) return null
-      var p = barPoint(px, py)
-      var targets = root.bar.clickTargets
-      for (var i = targets.length - 1; i >= 0; i--) {
-        var target = targets[i]
-        if (!target || !target.triggerPress || target.visible === false || target.opacity === 0 || !target.mapToItem) continue
-        if (root.bar.targetBelongsToWindow && !root.bar.targetBelongsToWindow(target, root.anchorWindow)) continue
-        var pos = root.anchorWindow.itemPosition(target)
-        if (p.x >= pos.x && p.x <= pos.x + target.width && p.y >= pos.y && p.y <= pos.y + target.height) return target
+      function inBarRegion(px, py) {
+        if (root.barPos === "bottom") return py >= root.screenH - root._barStripSize
+        if (root.barPos === "left") return px <= root._barStripSize
+        if (root.barPos === "right") return px >= root.screenW - root._barStripSize
+        return py <= root._barStripSize
       }
-      return null
-    }
 
-    function forwardBarClick(px, py, button) {
-      if (button !== Qt.LeftButton && button !== Qt.RightButton && button !== Qt.MiddleButton) return false
-      var target = pressTargetAt(px, py)
-      if (!target) return false
-      target.triggerPress(button)
-      return true
-    }
+      function barPoint(px, py) {
+        if (root.barPos === "bottom") return Qt.point(px, py - (root.screenH - root.barH))
+        if (root.barPos === "right") return Qt.point(px - (root.screenW - root.barW), py)
+        return Qt.point(px, py)
+      }
 
-    onPositionChanged: function(mouse) { hoveringBar = inBarRegion(mouse.x, mouse.y) }
-    onExited: hoveringBar = false
-    onClicked: function(mouse) {
-      // While Exclusive is priming, Hyprland may route a click from another
-      // output here with translated coordinates. Never interpret that as a
-      // click on this output's bar.
-      if (root.focusPrimed && inBarRegion(mouse.x, mouse.y) && forwardBarClick(mouse.x, mouse.y, mouse.button)) return
-      root.close()
+      function pressTargetAt(px, py) {
+        if (!root.anchorWindow || !root.anchorWindow.contentItem || !root.bar || !root.bar.clickTargets) return null
+        var p = barPoint(px, py)
+        var targets = root.bar.clickTargets
+        for (var i = targets.length - 1; i >= 0; i--) {
+          var target = targets[i]
+          if (!target || !target.triggerPress || target.visible === false || target.opacity === 0 || !target.mapToItem) continue
+          if (root.bar.targetBelongsToWindow && !root.bar.targetBelongsToWindow(target, root.anchorWindow)) continue
+          var pos = root.anchorWindow.itemPosition(target)
+          if (p.x >= pos.x && p.x <= pos.x + target.width && p.y >= pos.y && p.y <= pos.y + target.height) return target
+        }
+        return null
+      }
+
+      function forwardBarClick(px, py, button) {
+        if (button !== Qt.LeftButton && button !== Qt.RightButton && button !== Qt.MiddleButton) return false
+        var target = pressTargetAt(px, py)
+        if (!target) return false
+        target.triggerPress(button)
+        return true
+      }
+
+      onPositionChanged: function(mouse) { hoveringBar = inBarRegion(mouse.x, mouse.y) }
+      onExited: hoveringBar = false
+      onClicked: function(mouse) {
+        // While Exclusive is priming, Hyprland may route a click from another
+        // output here with translated coordinates. Never interpret that as a
+        // click on this output's bar.
+        if (root.focusPrimed && inBarRegion(mouse.x, mouse.y) && forwardBarClick(mouse.x, mouse.y, mouse.button)) return
+        root.close()
+      }
     }
   }
 
+  // For a sliding sheet, the dismissal area lives on a surface of its own:
+  // full-screen, transparent and not blurred, so the sheet's own surface can
+  // stay a strip. It sits on the sheet's output just below the sheet and
+  // catches everything outside the card, bar strip included. It maps with
+  // the sheet and catches the pointer for as long as the sheet is on screen,
+  // as the full-screen sheet did.
+  PanelWindow {
+    id: dismissSurface
+    screen: root.screen
+    visible: root.slideIn && root.sheetShown
+    color: "transparent"
+    exclusionMode: ExclusionMode.Ignore
+
+    WlrLayershell.namespace: "omarchy-keyboard-panel-dismiss"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+
+    anchors {
+      top: true
+      bottom: true
+      left: true
+      right: true
+    }
+
+    mask: Region {
+      width: root.screenW
+      height: root.screenH
+    }
+
+    Loader {
+      anchors.fill: parent
+      active: root.slideIn
+      sourceComponent: dismissAreaComponent
+    }
+  }
+
+  Loader {
+    // A popup that is not a sheet keeps catching outside clicks itself.
+    anchors.fill: parent
+    active: !root.slideIn
+    sourceComponent: dismissAreaComponent
+  }
+
   // The panel surface only spans the anchor's screen, and the compositor
-  // hit-tests pointer input per output, so `dismissArea` above can never see
+  // hit-tests pointer input per output, so the dismissal area above can never see
   // a click on another monitor. Give every other output a transparent twin
   // whose only job is to catch that click. They exist only while the panel is
   // logically open (not during the fade-out, matching `dismissArea.enabled`).
@@ -481,7 +546,7 @@ PanelWindow {
 
   BorderSurface {
     id: card
-    x: root.cardOrigin.x
+    x: root.cardOrigin.x - root.surfaceX
     y: root.cardOrigin.y
     // An overswipe stretches the sheet leftward instead of lifting it off the
     // screen edge: the card grows by the overshoot and the content keeps its
@@ -495,6 +560,7 @@ PanelWindow {
     radius: root.cornerRadius
     opacity: root.slideIn || root.open || root.popoutSwitching ? 1.0 : 0
     transform: Translate {
+      id: cardShift
       x: root.slideIn ? (1 - Math.min(1, root.shownProgress)) * (root.screenW - root.cardOrigin.x) - card.stretch : 0
     }
 
