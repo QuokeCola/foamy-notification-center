@@ -191,7 +191,9 @@ Item {
         sourceSize.width: Math.round(width * 2)
         fillMode: Image.PreserveAspectCrop
         asynchronous: true
-        layer.enabled: true
+        // Rounding the preview costs an offscreen layer and an effect; most
+        // cards have no preview, so they pay for neither.
+        layer.enabled: root.hasPreview
         layer.effect: MultiEffect {
           maskEnabled: true
           maskSource: previewMask
@@ -208,7 +210,7 @@ Item {
       radius: Math.min(Style.space(8), Style.cornerRadius)
       color: "black"
       visible: false
-      layer.enabled: true
+      layer.enabled: root.hasPreview
     }
     NotificationAction {
       id: dismissButton
