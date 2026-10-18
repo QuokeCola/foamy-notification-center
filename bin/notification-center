@@ -546,11 +546,12 @@ cmd_list() {
   # N after the cleared ones are dropped out of it.
   [[ $limit =~ ^[0-9]+$ ]] || die "list limit must be a nonnegative integer"
   local result
-  # Consume the whole stream but retain only the requested page. Closing a pipe
-  # early with head causes SIGPIPE and can append a second JSON value under pipefail.
+  # Parse only the requested page, but still drain the rest of the stream as
+  # raw lines: closing a pipe early with head causes SIGPIPE and can append a
+  # second JSON value under pipefail.
   result=$(tac "$archive" | jq -Rnc --argjson cleared "$cleared_at" --argjson limit "$limit" '
-    reduce (inputs | fromjson? | select((.timestamp // 0) > $cleared)) as $row
-      ([]; if length < $limit then . + [$row] else . end)
+    [limit($limit; inputs | fromjson? | select((.timestamp // 0) > $cleared))] as $rows
+      | reduce inputs as $_ (null; null) | $rows
   ') || die "cannot read notification archive"
   printf '%s\n' "$result"
 }
