@@ -54,9 +54,15 @@ Rectangle {
     cursorShape: Qt.PointingHandCursor
     onClicked: root.clicked()
   }
-  PanelToolTip {
-    visible: mouse.containsMouse && root.tooltipText !== ""
-    text: root.tooltipText
-    fontFamily: "sans-serif"
+  // Every card has a dismiss button, so build its tooltip only while it is
+  // hovered. The tooltip keeps its own show delay.
+  Loader {
+    active: mouse.containsMouse && root.tooltipText !== ""
+    sourceComponent: PanelToolTip {
+      parent: root
+      visible: true
+      text: root.tooltipText
+      fontFamily: "sans-serif"
+    }
   }
 }
