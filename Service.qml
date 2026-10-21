@@ -4,6 +4,7 @@ import Quickshell.Io
 import Quickshell.Hyprland
 import "." as Plugin
 import "Model.js" as Model
+import "components"
 
 // The archive, mounted once for the shell.
 //
@@ -28,6 +29,11 @@ Item {
   property int maxItems: 1000
   property bool showPreview: true
   property int pageSize: 500
+
+  BrowserIcons { id: browserIcons; onUpdated: root.browserIconsUpdated() }
+  signal browserIconsUpdated()
+  function faviconSource(row) { return row ? browserIcons.source(row) : "" }
+  function warmBrowserIcons(rows) { browserIcons.warm(rows) }
 
   property var entries: []
   // Keep removals authoritative while watcher events and older reads drain.
@@ -59,43 +65,81 @@ Item {
     "NC_PREVIEWS": root.showPreview ? "1" : "0"
   })
 
-  readonly property string foamyDirectory: (Quickshell.env("XDG_CONFIG_HOME") || Quickshell.env("HOME") + "/.config") + "/omarchy/plugins/foamy.notifications"
-  property bool foamyFocusAvailable: false
   property string focusError: ""
   property var focusEntry: null
+  property bool invokingDefault: false
+  property bool openingFile: false
   signal focusCompleted()
-  FileView {
-    path: root.foamyDirectory + "/manifest.json"
-    watchChanges: true
-    printErrors: false
-    onFileChanged: reload()
-    onLoaded: {
-      try { root.foamyFocusAvailable = JSON.parse(text()).id === "foamy.notifications" }
-      catch (e) { root.foamyFocusAvailable = false }
-    }
-    onLoadFailed: root.foamyFocusAvailable = false
-  }
-  function focusNotification(row) {
+
+  function focusNotification(row, useDefault) {
     if (focusProc.running || !row || !/^[0-9]+-[0-9]+$/.test(String(row.key))) return
     focusError = ""
     focusEntry = row
-    focusProc.stdinEnabled = true
+    openingFile = false
+    if (useDefault === false) { focusSendingApp(); return }
+    invokingDefault = true
+    // Probe the running daemon, not an installed plugin that may be disabled.
+    focusProc.command = ["omarchy-shell", "foamy.notifications", "invokeDefault", String(row.key)]
     focusProc.running = true
   }
+
+  function focusSendingApp() {
+    invokingDefault = false
+    // The stock helper treats names as regexes; allow only literal app names.
+    if (!/^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$/.test(focusEntry.app)) {
+      focusError = "Could not identify the sending app."
+      focusEntry = null
+      return
+    }
+    var directory = root.omarchyPath || Quickshell.env("OMARCHY_PATH")
+    var helper = decodeURIComponent(Qt.resolvedUrl("bin/focus-notification-app").toString().replace(/^file:\/\//, ""))
+    focusProc.command = ["bash", helper, directory, focusEntry.app.replace(/\./g, "\\.")]
+    focusProc.running = true
+  }
+
+  function finishFocus(exitCode, exitStatus, output) {
+    var succeeded = exitCode === 0 && exitStatus === 0
+    if (invokingDefault) {
+      var result = String(output || "").trim()
+      if (succeeded && result === "busy") {
+        focusError = "This notification is already being opened. Try again."
+        focusEntry = null
+        return
+      }
+      if (!succeeded || result !== "invoked") {
+        // Live sender actions take priority; archived pictures use a fixed opener.
+        var command = Model.fileCommand(focusEntry)
+        if (command) {
+          invokingDefault = false
+          openingFile = true
+          var helper = decodeURIComponent(Qt.resolvedUrl("bin/open-notification-image").toString().replace(/^file:\/\//, ""))
+          focusProc.command = ["bash", helper, command[0] === "tensaku-edit" ? "edit-screenshot" : "view-image", command[1]]
+          focusProc.running = true
+        } else focusSendingApp()
+        return
+      }
+      // The daemon owns durable handling of its callback and acknowledges removal.
+      root.focusCompleted()
+      focusEntry = null
+      return
+    }
+    if (succeeded) { root.remove(focusEntry.key); root.focusCompleted() }
+    else if (!openingFile && exitCode === 3 && exitStatus === 0) {
+      // Background senders often have no window; retain history without an error.
+      focusError = ""
+    } else {
+      focusError = openingFile ? "Could not open the image. Check that the file and its app are available, then try again."
+                              : "Could not focus the sending app. Open the app and try again."
+      console.warn(openingFile ? "Notification image opening failed:" : "Notification focus failed:", exitCode, exitStatus)
+    }
+    focusEntry = null
+  }
+
   Process {
     id: focusProc
-    command: ["python3", root.foamyDirectory + "/bin/notification-helper.py", "focus-configured"]
-    stdinEnabled: true
-    onStarted: {
-      write(JSON.stringify({app:root.focusEntry.app,desktopEntry:root.focusEntry.desktopEntry || "",body:root.focusEntry.body || ""}))
-      stdinEnabled = false
-    }
-    stderr: StdioCollector { id: focusErrors }
-    onExited: function(exitCode, exitStatus) {
-      if (exitCode === 0 && exitStatus === 0) { root.remove(root.focusEntry.key); root.focusCompleted() }
-      else { root.focusError = "Could not identify the window. Check browserMappings and try again."; console.warn("Notification focus failed:", focusErrors.text) }
-      root.focusEntry = null
-    }
+    stdout: StdioCollector { id: focusOutput }
+    stderr: StdioCollector {}
+    onExited: function(exitCode, exitStatus) { root.finishFocus(exitCode, exitStatus, focusOutput.text) }
   }
 
   signal entryAdded(var entry)
@@ -172,10 +216,16 @@ Item {
         root.removalError = "Could not dismiss notifications. Try again."
         console.warn("Notification dismissal failed:", removeErrors.text)
         root.load()
-      }
+      } else root.releaseNotificationActions(root.activeRemovalKeys)
       root.activeRemovalKeys = []
       root.startRemoval()
     }
+  }
+
+  function releaseNotificationActions(keys) {
+    // Stock and older daemons have no retained actions; cleanup is optional IPC.
+    for (var i = 0; i < keys.length; i += 100)
+      Quickshell.execDetached(["omarchy-shell", "-q", "foamy.notifications", "releaseHistory", keys.slice(i, i + 100).join(",")])
   }
 
   // Ordinary plugins use the public IPC commands, not the bar-only service proxy.
@@ -224,7 +274,9 @@ Item {
   function clearAll() {
     entries = []
     entriesReset()
-    Quickshell.execDetached(root.storeCommand(["clear"]))
+    // Release callbacks only after durable clearing, without catching newer arrivals.
+    Quickshell.execDetached(["bash", "-c", '"$1" clear && omarchy-shell -q foamy.notifications releaseHistoryBefore "$2"',
+      "--", root.script, String(Date.now())])
   }
 
   function absorb(line) {
@@ -407,7 +459,6 @@ Item {
       return JSON.stringify({
         entries: root.entries.length,
         listLoads: root.listLoadCount,
-        foamyFocusAvailable: root.foamyFocusAvailable,
         focusError: root.focusError,
         loadError: root.loadError,
         newest: root.entries.length > 0 ? root.entries[0].summary : "",

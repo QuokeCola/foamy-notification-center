@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "../Translations.js" as Translations
 
@@ -14,7 +15,7 @@ Item {
   property double now: 0
   property string language: "en"
   property double readMark: 0
-  property color foreground: Color.foreground
+  property color foreground: Commons.Color.foreground
   property string fontFamily: Style.font.family
   signal toggleRequested()
   signal removeRequested()
@@ -36,7 +37,7 @@ Item {
     anchors.fill: headingMouse
     color: "transparent"
     border.width: root.hasCursor && !root.dismissHasCursor ? 1 : 0
-    border.color: Color.accent
+    border.color: Commons.Color.accent
     radius: Math.min(Style.space(6), Style.cornerRadius)
   }
   MouseArea {
@@ -55,16 +56,29 @@ Item {
     height: width
     Image {
       id: appIcon
+      objectName: "notificationAppIcon"
       anchors.fill: parent
       source: root.iconSource
       sourceSize.width: width * 2
       sourceSize.height: height * 2
       fillMode: Image.PreserveAspectFit
       asynchronous: true
+      visible: status === Image.Ready && faviconIcon.status !== Image.Ready
+    }
+    Image {
+      id: faviconIcon
+      objectName: "notificationFavicon"
+      anchors.fill: parent
+      source: String(root.group.favicon || "").indexOf("file://") === 0 ? root.group.favicon : ""
+      sourceSize.width: width * 2
+      sourceSize.height: height * 2
+      fillMode: Image.PreserveAspectFit
+      asynchronous: true
+      visible: status === Image.Ready
     }
     Text {
       anchors.centerIn: parent
-      visible: root.iconSource === "" || appIcon.status === Image.Error
+      visible: appIcon.status !== Image.Ready && faviconIcon.status !== Image.Ready
       textFormat: Text.PlainText
       text: root.group.glyph || root.group.app.charAt(0).toUpperCase()
       color: root.foreground
@@ -80,7 +94,7 @@ Item {
     anchors.rightMargin: Style.space(9)
     anchors.verticalCenter: parent.verticalCenter
     textFormat: Text.PlainText
-    text: root.group.app === "Unknown app" ? Translations.text("Unknown app", root.language) : root.group.app
+    text: root.group.app === "Unknown app" ? Translations.text("Unknown app", root.language) : (root.group.label || root.group.app)
     elide: Text.ElideRight
     color: root.foreground
     font.family: root.fontFamily
@@ -98,7 +112,7 @@ Item {
       width: Style.space(4)
       height: width
       radius: width / 2
-      color: Color.accent
+      color: Commons.Color.accent
     }
     Text {
       textFormat: Text.PlainText

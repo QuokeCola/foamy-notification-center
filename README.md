@@ -6,16 +6,24 @@ Notification history with app stacks, search, and do not disturb.
 
 ## Install
 
-Requires Omarchy Quattro with stock notifications or Foamy Notifications enabled, `jq`, and
-`inotify-tools`.
+Requires Omarchy Quattro with stock notifications or Foamy Notifications enabled, `jq`, `wl-paste`, and GNU `timeout`, plus
+`inotify-tools`. Website favicon lookup uses the system Python 3 runtime.
 
-Picture previews also require `file` and ImageMagick 7 (`magick`). PNG, JPEG,
-GIF, and WebP previews are converted to a single PNG of at most 720 × 720 pixels.
+File-backed app icons, attached images, and picture previews require `file` and
+ImageMagick 7 (`magick`). PNG, JPEG (including progressive JPEG), GIF, and WebP
+files are converted outside the shell to a single PNG of at most 720 × 720 pixels.
+BMP/ICO and self-contained SVG app icons and attached images are also supported.
+SVG uses librsvg through ImageMagick in an empty working directory; external
+resources are unavailable. Transparency and aspect ratio are preserved; themed
+app icons still resolve normally.
 Conversion uses a plugin-local policy: no delegates or disk pixel cache, an
 8,192-pixel width/height limit, a 128 MiB pixel cache, a 512 MiB process memory
 limit, and a five-second timeout (forced termination after one further second).
-Unsupported, oversized, or failed previews are discarded; notification text is
-still archived. Missing preview tools also leave notifications without previews.
+Unsupported, oversized, or failed images are omitted; notification text remains
+archived and app icons fall back to the app glyph. Missing conversion tools also
+omit file-backed images rather than exposing originals to the shell. Existing
+archived images are normalized before the first read, even when their sender
+files have disappeared. Opening a picture still uses its original file.
 
 ```sh
 omarchy plugin add https://github.com/foamrider/foamy-notification-center.git --enable
@@ -28,10 +36,77 @@ omarchy plugin add https://github.com/foamrider/foamy-notification-center.git --
   including the visible card in a collapsed stack.
 - Hover to dismiss a stack or individual notification. The trash clears the panel.
 - Click search or press `/` to filter. Press Escape to close search.
-- Click the silence button, or right-click the bar icon, to toggle do not disturb.
+- Open **More options (⋯)** to silence/allow notifications or open **Settings**.
+  Right-clicking the bar icon also toggles do not disturb.
+- Clear all stays next to search. Stack dismissal uses the X icon,
+  shown on hover or keyboard selection.
+
+Settings use the same controls as Foamy Bolt and Audio. The **Notification
+Center** section changes this widget's browser grouping, favicons, compact view,
+pictures, retention (days), and maximum archive count. **Foamy Notifications**
+changes the enabled popup service's duplicate grouping, favicons, compact view,
+pictures, normal duration (seconds), and **X removes from history**. That option
+is off by default; when enabled, the popup's X button removes its whole duplicate
+group from history. Right-click still hides the popup and keeps its history.
+Hostname/browser stacks belong only to
+the center; popups group exact duplicates with matching actions.
+
+Changes save immediately to each plugin's own `shell.json` entry. Popup settings
+are hidden when Foamy Notifications is unavailable. Its section instead shows
+a muted "Plugin not installed" or "Plugin not enabled" message, using the host's
+installed-plugin registry when available. Opening this panel does not enable it.
+Invalid values and save/read failures are shown in the panel.
+The popup settings helper validates values, preserves unrelated configuration
+and configuration symlinks (including Stow), serializes its own edits, and refuses
+to overwrite a concurrent file change detected before replacement. It does not
+change notification history or the enabled plugin list. The center uses Omarchy's
+existing widget settings IPC. Back or Escape returns from Settings; dropdowns
+and numeric editors consume Escape first to cancel their edit.
 
 Set `language` on the widget entry in `shell.json`: `system` (default), `en`,
 or `nb`. Other system languages fall back to English.
+
+Set `useBrowserFavicons` on the widget entry to `true` (default) to show a
+website’s locally cached favicon, with the app icon and then the glyph as
+fallbacks. Set `browserGrouping` to `"browser"` (default), `"hostname"`, or
+`"none"`. Hostname mode gives each identified website its own stack and heading;
+none leaves each browser notification separate. Native apps keep their stacks.
+Missing website identities remain under the browser. A browser-wide stack with
+several websites keeps the browser icon because it has no single website identity.
+
+For example, on the `foamy.notification-center` widget entry:
+
+```json
+"useBrowserFavicons": true,
+"browserGrouping": "hostname"
+```
+
+Website identity comes only from a browser’s leading HTTP(S) URL/link or a bare
+hostname on its own first line. Links inside the message and sender avatars do
+not identify the site. Grouping does not change click targets or distinguish
+browser profiles/accounts. These settings are independent of Foamy Notifications.
+
+Search and numeric settings use bounded clipboard reads (16 KiB, two seconds).
+Failed paste leaves the field unchanged and displays an error. Keyboard paste,
+the context menu, and primary-selection paste use the same limits.
+
+Favicons are read asynchronously from standard Linux Vivaldi, Chrome, Chromium,
+Brave, Edge and Opera profile caches. Firefox, custom profile locations and missing
+icons fall back to the app icon. This also works with stock Omarchy notifications
+when the sender’s website origin is present in the archived body. No website
+requests or additional Python packages are used. PNG copies use the shared private cache
+at `$XDG_CACHE_HOME/foamy/browser-favicons` (normally `~/.cache/foamy/browser-favicons`),
+limited to 256 icons of at most 64 KiB and 256 × 256 pixels. Successful lookups
+refresh after one day; missing icons can retry after five minutes on a display
+model change. Lookups cover only the first 128 groups in the display.
+
+Browser databases are opened read-only. If a rollback database is locked, the
+helper can read an in-memory copy of at most 32 MiB. It rejects active
+journals, WAL sidecars, changed files and copies that fail SQLite's integrity
+check. Copying and querying share a two-second deadline. No database copies are
+written to disk; the helper never writes to the browser database or removes its
+locks. A cache that cannot be read safely keeps the app icon and reports
+`cache-unavailable`.
 
 Set `compact` on the widget entry in `shell.json` to `true` for a slim app
 header and tighter message spacing. The default, `false`, keeps the roomier
@@ -57,16 +132,28 @@ Message updates retain their card, and scrolling does not replay the entrance.
 Keeps up to 1,000 notifications for 30 days by default. Silenced notifications
 remain in history; stock Omarchy exceptions still apply.
 
-The default `clickAction: "Auto"` opens only an absolute PNG, JPEG, GIF, or WebP
-path extracted from the notification action; otherwise it focuses the sending
-app. Sender commands (`exec` and `execArgv`) are never replayed or kept in the
-archive. Existing archived commands are removed on the next sync.
-Set `clickAction` to `"Focus the app"` to skip pictures, or `"Nothing"` to disable
-notification body clicks. App callbacks and URL actions cannot be replayed.
+The default `clickAction: "Auto"` first tries the current popup action through
+Foamy Notifications. If that action is unavailable, it opens an absolute PNG,
+JPEG, GIF, or WebP path, or focuses the sending app when no image is available.
+The standard two-argument `tensaku-edit` screenshot action becomes a fixed
+`edit-screenshot` intent, so screenshots still open in Tensaku after expiry or
+reload. Other images open with `xdg-open`. Missing files, unavailable apps, or immediate launch failures leave
+the entry available for retry.
+
+Sender commands (`exec` and `execArgv`) are never replayed or kept in the archive.
+Custom screenshot editors work while their popup action is live; after expiry,
+they use the image viewer. Existing archived commands are removed on the next
+sync. Previously disarmed entries gain screenshot editing only when their
+original notification source still exists; the editor cannot be inferred from
+an image path alone.
+Set `clickAction` to `"Focus the app"` to skip pictures and live actions, or
+`"Nothing"` to disable notification body clicks. Closed app callbacks and URL
+actions cannot be replayed.
 
 When used with Foamy Notifications, activating a popup removes it from this center
-and clears its unread state. Dismissing the popup with × or right-click keeps it
-in history. The public `foamy.notification-center.store remove` IPC command accepts
+and clears its unread state. Right-click dismissal keeps it in history. × also
+keeps history unless `closeButtonRemovesHistory` is enabled on the
+`foamy.notifications` service entry. The public `foamy.notification-center.store remove` IPC command accepts
 comma-separated notification keys and performs a durable removal. The companion
 `handled` command only updates the in-memory list after a caller has already
 committed that removal; Foamy Notifications uses this to avoid a second archive
@@ -81,11 +168,17 @@ cases. Changing the enabled plugin in `shell.json` reconnects the source watcher
 opening the panel also requests a fresh list. Reads which overlap newer events
 are retried, and duplicate filesystem events skip retention work.
 
-When Foamy Notifications is installed, app focusing uses its helper and current
-`browserMappings`, so browser messages select the same web-app window as popups.
-Ambiguous or unavailable windows leave the center entry available with an error.
-Without that plugin, the existing stock focus helper remains the fallback. This
-integration does not execute archived sender commands or restore dead callbacks.
+When Foamy Notifications is running, Auto clicks without pictures request the exact live
+notification's default action, letting the browser or app open its own destination.
+Foamy keeps live browser callbacks available when popups expire, are hidden, or
+are silenced. Clicking those history entries can still open the original destination.
+Callbacks are limited to the newest 100 retained actions in the current shell
+session. Sender closure, history dismissal or clearing, disabling the center,
+and eviction release them. A browser or shell restart cannot restore old callbacks.
+Unavailable callbacks, older Foamy versions, and stock Omarchy Notifications
+fall back to the stock app-focus helper. No browser mappings are
+required for center clicks. Failed focus keeps the entry available with an error.
+The center never extracts links from message text or replays archived commands.
 
 Text-only replacements reuse retained images and previews. Each plugin still owns
 its own image lifetime and cleanup: the center's longer retention does not depend
@@ -122,8 +215,13 @@ Card animations can be checked with `python3 tests/motion.py` (isolated Qt) or
 Stock compatibility can be checked without touching personal history:
 
 ```sh
+node --test tests/*.test.js
+python3 -m unittest discover -s tests -p '*_test.py' -v
+python3 tests/browser-ui.py
+python3 tests/settings-ui.py
 python3 tests/stock-runtime.py
 python3 tests/stock-runtime.py --custom
 ```
 
 These checks use a private D-Bus session and temporary home directory.
+The settings panel check requires a running Wayland session.

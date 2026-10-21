@@ -134,67 +134,68 @@ is_path() {
   esac
 }
 
-# Copy one of the service's images into our own store, and answer with the path
-# to the copy. The originals live and die with the ten files the service keeps,
-# so an entry that still pointed at one would lose its face within the hour.
+# Normalize every sender file before it reaches Qt, including app icons.
+# Compressed byte limits alone do not bound native decoder allocations.
 copy_image() {
   local src=$1 key=$2 slot=$3 dest mime coder
   src=${src#file://}
-  [[ -f $src ]] || { printf '%s' ""; return; }
-  dest="$images/$key-$slot"
-  # Bounded, because these are files another program wrote and a panel has to
-  # survive one of them being enormous.
-  if timeout 5 head -c 5242881 -- "$src" > "$dest.tmp" 2>/dev/null &&
-     (( $(stat -c%s -- "$dest.tmp" 2>/dev/null || echo 0) <= 5242880 )); then
-    # Only actual images are kept. These paths arrive on the notification,
-    # which is to say from whoever sent it, and an icon "at" ~/.ssh/id_rsa
-    # should not quietly become a second copy of it in here.
-    if [[ $slot != preview ]] && command -v file >/dev/null 2>&1; then
-      case "$(file -bL --mime-type -- "$dest.tmp" 2>/dev/null)" in
-        image/*) ;;
-        *) rm -f -- "$dest.tmp"; printf '%s' ""; return ;;
-      esac
+  [[ -f $src ]] || return 0
+  dest="$images/$key-$slot.png"
+  if timeout -k 1 5 head -c 5242881 -- "$src" > "$dest.tmp" 2>/dev/null &&
+     (( $(stat -c%s -- "$dest.tmp" 2>/dev/null || echo 5242881) <= 5242880 )); then
+    mime=$(timeout -k 1 2 file -bL --mime-type -- "$dest.tmp" 2>/dev/null) || mime=""
+    case $mime in
+      image/png) coder=PNG ;;
+      image/jpeg) coder=JPEG ;;
+      image/gif) coder=GIF ;;
+      image/webp) coder=WEBP ;;
+      image/bmp|image/x-ms-bmp) coder=BMP ;;
+      image/vnd.microsoft.icon|image/x-icon) coder=ICO ;;
+      image/svg+xml) coder=""; [[ $slot != preview ]] && coder=RSVG ;;
+      *) coder="" ;;
+    esac
+    if [[ -n $coder ]] && resize_preview "$coder" "$dest.tmp" "$dest.resized" &&
+       mv -f -- "$dest.resized" "$dest"; then
+      rm -f -- "$dest.tmp"
+      printf 'file://%s' "$dest"
+      return 0
     fi
-    # A preview is kept at the size it is shown at rather than the size the
-    # camera took it at. A month of motion alerts at 175kB each is a store
-    # nobody asked for; at panel width they are a fifth of that, and the
-    # original is still where it always was.
-    if [[ $slot == preview ]]; then
-      # Extension and compressed size do not bound decoding. Require a known
-      # raster decoder, and never retain the original when conversion fails.
-      mime=$(timeout -k 1 2 file -bL --mime-type -- "$dest.tmp" 2>/dev/null) || mime=""
-      case $mime in
-        image/png) coder=PNG ;;
-        image/jpeg) coder=JPEG ;;
-        image/gif) coder=GIF ;;
-        image/webp) coder=WEBP ;;
-        *) coder="" ;;
-      esac
-      if [[ -z $coder ]] || ! resize_preview "$coder" "$dest.tmp" "$dest.resized" ||
-         ! mv -f -- "$dest.resized" "$dest.tmp"; then
-        printf '%s\n' 'notification-center: preview_rejected: unsupported image, decoder unavailable, or conversion limit reached; keeping notification text' >&2
-        rm -f -- "$dest.tmp" "$dest.resized"
-        return
-      fi
-    fi
-    mv -f -- "$dest.tmp" "$dest"
-    printf 'file://%s' "$dest"
-  else
-    rm -f -- "$dest.tmp"
-    printf '%s' ""
   fi
+  printf 'notification-center: %s_rejected: unsupported image, decoder unavailable, or conversion limit reached; keeping notification text\n' "$slot" >&2
+  rm -f -- "$dest.tmp" "$dest.resized"
+}
+
+# Only theme names bypass file normalization. Sender-chosen provider URLs must
+# not ask the shell to decode a file through another image provider.
+archive_image() {
+  local src=$1 key=$2 slot=$3
+  if is_path "$src"; then
+    copy_image "$src" "$key" "$slot"
+  elif [[ $slot == appIcon && $src =~ ^[[:alnum:]_.-]+$ ]]; then
+    printf '%s' "$src"
+  fi
+  return 0
 }
 
 resize_preview() (
-  local coder=$1 src=$2 dest=$3
+  local coder=$1 src=$2 dest=$3 scratch
   command -v magick >/dev/null 2>&1 || return 1
   [[ -r $preview_policy_dir/policy.xml ]] || return 1
   # OS limits also cover decoder allocations outside ImageMagick's pixel cache.
   # The external deadline kills stuck decoders while the archive lock is held.
   ulimit -c 0 -v 524288 -f 10240 || return 1
-  MAGICK_CONFIGURE_PATH="$preview_policy_dir" timeout -k 1 5 \
-    magick "$coder:${src}[0]" -auto-orient -resize '720x720>' -strip \
-    "PNG:$dest" 2>/dev/null || return 1
+  if [[ $coder == RSVG ]]; then
+    # Librsvg confines linked resources to the base directory. Read stdin in
+    # an empty directory so a sender's SVG cannot load neighbouring files.
+    scratch=$(mktemp -d) || return 1
+    trap 'rmdir -- "$scratch"' EXIT
+    ( cd "$scratch" && MAGICK_CONFIGURE_PATH="$preview_policy_dir" timeout -k 1 5 \
+      magick -background none 'RSVG:-[0]' -auto-orient -resize '720x720>' -strip "PNG:$dest" < "$src" 2>/dev/null ) || return 1
+  else
+    MAGICK_CONFIGURE_PATH="$preview_policy_dir" timeout -k 1 5 \
+      magick "$coder:${src}[0]" -auto-orient -resize '720x720>' -strip \
+      "PNG:$dest" 2>/dev/null || return 1
+  fi
   [[ -s $dest ]] && (( $(stat -c%s -- "$dest" 2>/dev/null || echo 5242881) <= 5242880 ))
 )
 
@@ -238,12 +239,25 @@ preview_source() {
   printf '%s' "$action" | grep -oiE "(file://)?/[^\"' ]*\.(jpe?g|png|webp|gif)" | head -n 1
 }
 
+# Reduce the standard screenshot argv to a fixed intent, with no executable
+# or extra arguments retained. Other editors remain live-only actions.
+screenshot_action() {
+  local action=$1 file=$2
+  printf '%s' "$action" | jq -r --arg file "$file" '
+    if type == "array" and length == 2 then
+      if (.[0] == "tensaku-edit" or .[0] == "/usr/bin/tensaku-edit")
+         and (.[1] | type == "string") and .[1] == $file and $file != ""
+      then "edit-screenshot" else "" end
+    else "" end
+  ' 2>/dev/null || true
+}
+
 # Archive new or changed source content. One shared service receives these
 # updates; unchanged filesystem events must not repeat unread or retention work.
 ingest_file() {
   local LC_ALL=C
   local file=$1
-  local key entry app_icon image_src exec_src icon_copy image_copy file_src preview_copy existing source_hash assets_hash sources_hash source_json asset
+  local key entry app_icon image_src exec_src icon_copy image_copy file_src file_action preview_copy existing source_hash assets_hash sources_hash source_json asset
   key=$(basename -- "$file"); key=${key%.json}
   [[ $key =~ ^[0-9]+-[0-9]+$ ]] || return 0
   if is_dismissed "$key"; then
@@ -279,6 +293,7 @@ ingest_file() {
 
   file_src=$(preview_source "$exec_src")
   file_src=${file_src#file://}
+  file_action=$(screenshot_action "$exec_src" "$file_src")
   existing=$(grep -F "\"key\":\"$key\"" "$archive" | head -n 1)
   source_hash=$(printf '%s' "$source_json" | sha256sum); source_hash=${source_hash%% *}
   sources_hash=$(printf '%s\n' "$app_icon" "$image_src" "$file_src" "$previews" | sha256sum); sources_hash=${sources_hash%% *}
@@ -289,25 +304,23 @@ ingest_file() {
       is_path "$asset" && stat -Lc '%d:%i:%s:%y:%z' -- "${asset#file://}" 2>/dev/null
     done
   } | sha256sum); assets_hash=${assets_hash%% *}
-  if [[ -n $existing ]] && [[ $(jq -r '.sourceHash // ""' <<< "$existing") == "$source_hash" ]] &&
+  if [[ -n $existing ]] && [[ $(jq -r '.fileAction // ""' <<< "$existing") == "$file_action" ]] && [[ $(jq -r '.imageFormat // 0' <<< "$existing") == 1 ]] && [[ $(jq -r '.sourceHash // ""' <<< "$existing") == "$source_hash" ]] &&
      [[ $(jq -r '.assetsHash // ""' <<< "$existing") == "$assets_hash" ]]; then
     return 0
   fi
-  if [[ -n $existing ]] && [[ $(jq -r '.assetsHash // ""' <<< "$existing") == "$assets_hash" ]]; then
+  if [[ -n $existing ]] && [[ $(jq -r '.imageFormat // 0' <<< "$existing") == 1 ]] && [[ $(jq -r '.assetsHash // ""' <<< "$existing") == "$assets_hash" ]]; then
     icon_copy=$(jq -r '.appIcon // ""' <<< "$existing")
     image_copy=$(jq -r '.image // ""' <<< "$existing")
     preview_copy=$(jq -r '.preview // ""' <<< "$existing")
   else
-    icon_copy=$app_icon
-    image_copy=$image_src
-    is_path "$app_icon" && icon_copy=$(copy_image "$app_icon" "$key" "appIcon")
-    is_path "$image_src" && image_copy=$(copy_image "$image_src" "$key" "image")
+    icon_copy=$(archive_image "$app_icon" "$key" "appIcon")
+    image_copy=$(archive_image "$image_src" "$key" "image")
     preview_copy=""
     if (( previews )) && [[ -n $file_src ]]; then
       preview_copy=$(copy_image "$file_src" "$key" "preview")
     fi
     # Sender cleanup is not an image change: keep retained copies when the same original disappears.
-    if [[ -n $existing ]] && [[ $(jq -r '.assetSources // ""' <<< "$existing") == "$sources_hash" ]]; then
+    if [[ -n $existing ]] && [[ $(jq -r '.imageFormat // 0' <<< "$existing") == 1 ]] && [[ $(jq -r '.assetSources // ""' <<< "$existing") == "$sources_hash" ]]; then
       if is_path "$app_icon" && [[ ! -e ${app_icon#file://} ]]; then icon_copy=$(jq -r '.appIcon // ""' <<< "$existing"); fi
       if is_path "$image_src" && [[ ! -e ${image_src#file://} ]]; then image_copy=$(jq -r '.image // ""' <<< "$existing"); fi
       if [[ -n $file_src && ! -e $file_src ]]; then preview_copy=$(jq -r '.preview // ""' <<< "$existing"); fi
@@ -323,8 +336,10 @@ ingest_file() {
     --arg image "$image_copy" \
     --arg preview "$preview_copy" \
     --arg file "$file_src" \
+    --arg fileAction "$file_action" \
     '{
        key: $key,
+       imageFormat: 1,
        sourceHash: $sourceHash,
        assetsHash: $assetsHash,
        assetSources: $assetSources,
@@ -336,6 +351,7 @@ ingest_file() {
        image: $image,
        preview: $preview,
        file: $file,
+       fileAction: $fileAction,
        glyph: (.glyph // ""),
        urgency: (.urgency // 1),
        timestamp: (.timestamp // 0)
@@ -427,7 +443,8 @@ prune() {
   local key
   while IFS= read -r key; do
     [[ -n $key ]] || continue
-    rm -f -- "$images/$key-appIcon" "$images/$key-image" "$images/$key-preview"
+    rm -f -- "$images/$key-appIcon" "$images/$key-image" "$images/$key-preview" \
+      "$images/$key-appIcon.png" "$images/$key-image.png" "$images/$key-preview.png"
     # The source file too. It was the service's copy of something this archive
     # now no longer has, so there is nothing left that would show it again.
     rm -f -- "$src_history/$key.json"
@@ -473,7 +490,7 @@ sync_and_prune() {
 
 cmd_sync() {
   ensure_store
-  with_lock disarm_archive
+  with_lock prepare_archive || die "cannot normalize notification archive"
   with_lock sync_and_prune
 }
 
@@ -484,6 +501,42 @@ cmd_sync() {
 disarm_archive() {
   grep -qE '"(exec|execArgv)"[[:space:]]*:' "$archive" 2>/dev/null || return 0
   backfill_previews >/dev/null
+}
+
+prepare_archive() {
+  disarm_archive || return 1
+  normalize_archive
+}
+
+# Older records may outlive their sender files. Convert their retained copies
+# under the archive lock before any list is returned, including the first load
+# racing watcher startup. New URLs avoid Qt reusing a cached original JPEG.
+normalize_archive() {
+  local pending line key icon image preview
+  pending=$(jq -Rc 'fromjson? | select(.imageFormat != 1) |
+    select(any(.appIcon, .image, .preview; type == "string" and (contains("/") or contains(":"))))' "$archive") || return 1
+  [[ -n $pending ]] || return 0
+  : > "$archive.images" || return 1
+  while IFS= read -r line; do
+    key=$(jq -r '.key // ""' <<< "$line") || return 1
+    icon=""; image=""; preview=""
+    if [[ $key =~ ^[0-9]+-[0-9]+$ ]]; then
+      icon=$(archive_image "$(jq -r '.appIcon // ""' <<< "$line")" "$key" appIcon)
+      image=$(archive_image "$(jq -r '.image // ""' <<< "$line")" "$key" image)
+      preview=$(archive_image "$(jq -r '.preview // ""' <<< "$line")" "$key" preview)
+    fi
+    jq -c --arg icon "$icon" --arg image "$image" --arg preview "$preview" \
+      '. + {appIcon:$icon, image:$image, preview:$preview, imageFormat:1}' <<< "$line" >> "$archive.images" || return 1
+  done <<< "$pending"
+  jq -Rc --slurpfile replacements "$archive.images" '
+    ($replacements | INDEX(.key)) as $updates | fromjson? | $updates[.key] // .
+  ' "$archive" > "$archive.tmp" || return 1
+  mv -f -- "$archive.tmp" "$archive" || return 1
+  rm -f -- "$archive.images"
+  while IFS= read -r key; do
+    [[ $key =~ ^[0-9]+-[0-9]+$ ]] || continue
+    rm -f -- "$images/$key-appIcon" "$images/$key-image" "$images/$key-preview"
+  done < <(jq -r '.key' <<< "$pending")
 }
 
 cmd_watch() {
@@ -533,6 +586,7 @@ ingest_one() {
 
 cmd_list() {
   ensure_store
+  with_lock normalize_archive || die "cannot normalize notification archive"
   local limit=${1:-200}
   local cleared_at=0
   if [[ -s $cleared_at_file ]]; then
@@ -576,6 +630,7 @@ remove_keys() {
   mv -f "$archive.tmp" "$archive" || return 1
   for key in "$@"; do
     rm -f -- "$images/$key-appIcon" "$images/$key-image" "$images/$key-preview" \
+      "$images/$key-appIcon.png" "$images/$key-image.png" "$images/$key-preview.png" \
       "$src_history/$key.json" "$src_dir/$key.json" || return 1
   done
 }
@@ -684,7 +739,7 @@ seed_entries() {
 # The second is the ordinary one: entries that never had a picture get one now
 # if the file they name is still on disk.
 backfill_previews() {
-  local tmp="$archive.backfill" line key exec_src file_src preview_copy filled=0
+  local tmp="$archive.backfill" line key exec_src file_src file_action preview_copy filled=0
   : > "$tmp"
   while IFS= read -r line; do
     [[ -n $line ]] || continue
@@ -700,6 +755,11 @@ backfill_previews() {
     fi
     file_src=${file_src#file://}
 
+    file_action=$(printf '%s' "$line" | jq -r '.fileAction // ""')
+    if [[ $file_action != edit-screenshot ]]; then
+      file_action=$(screenshot_action "$(printf '%s' "$line" | jq -r '.execArgv // ""')" "$file_src")
+    fi
+    [[ -n $file_src ]] || file_action=""
     preview_copy=$(printf '%s' "$line" | jq -r '.preview // ""')
     if [[ -z $preview_copy && -n $file_src ]] && (( previews )); then
       preview_copy=$(copy_image "$file_src" "$key" "preview")
@@ -709,7 +769,8 @@ backfill_previews() {
     printf '%s' "$line" | jq -c \
       --arg file "$file_src" \
       --arg preview "$preview_copy" \
-      'del(.exec, .execArgv) + {file: $file, preview: $preview}' >> "$tmp"
+      --arg fileAction "$file_action" \
+      'del(.exec, .execArgv) + {file: $file, fileAction: $fileAction, preview: $preview}' >> "$tmp"
   done < "$archive"
   mv -f "$tmp" "$archive"
   printf '%s' "$filled"

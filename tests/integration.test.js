@@ -18,10 +18,10 @@ function fixture(t) {
 test('replacement updates retain identity and images; repeated ingestion is idempotent',t=>{
  const f=fixture(t),stamp=Date.now(),key=`${stamp}-42`,file=path.join(f.source,key+'.json')
  const image=path.join(f.dir,'image.png')
- fs.writeFileSync(image,Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aMioAAAAASUVORK5CYII=','base64'))
+ const generated=spawnSync('magick',['-size','1x1','xc:red',image],{encoding:'utf8'});assert.equal(generated.status,0,generated.stderr)
  const entry={timestamp:stamp,originalId:42,app:'Download',desktopEntry:'download',summary:'Transfer',body:'10 percent',image}
  fs.writeFileSync(file,JSON.stringify(entry));f.run('sync')
- const retained=path.join(f.store,'images',key+'-image'),before=fs.statSync(retained,{bigint:true})
+ const retained=path.join(f.store,'images',key+'-image.png'),before=fs.statSync(retained,{bigint:true})
  entry.body='Download complete';fs.writeFileSync(file,JSON.stringify(entry));f.run('sync')
  const rows=f.run('list');assert.equal(rows.length,1);assert.equal(rows[0].body,entry.body);assert.equal(rows[0].desktopEntry,'download')
  assert.equal(fs.statSync(retained,{bigint:true}).mtimeNs,before.mtimeNs)

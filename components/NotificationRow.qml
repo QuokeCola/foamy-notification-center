@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Effects
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "../Translations.js" as Translations
 
@@ -17,7 +18,7 @@ Item {
   property var groupEntries: []
   // The colour urgent messages are marked in: the app's own, when its icon
   // has one, else the theme's urgent colour.
-  property color accent: Color.urgent
+  property color accent: Commons.Color.urgent
   // A real card of this stack is on screen in the folded position, so the
   // drawn edges stand aside for it.
   property bool tuckedCardsLive: false
@@ -28,7 +29,7 @@ Item {
   property bool showPreview: true
   property double now: 0
   property string language: "en"
-  property color foreground: Color.foreground
+  property color foreground: Commons.Color.foreground
   property string fontFamily: Style.font.family
   signal clicked()
   signal removeRequested()
@@ -37,7 +38,7 @@ Item {
   readonly property bool critical: Number(entry.urgency) === 2
   // Cards pass behind one another while a stack folds, so they must hide
   // what is under them: the theme's popup colour, without its alpha.
-  readonly property color cardFill: Qt.rgba(Color.popups.background.r, Color.popups.background.g, Color.popups.background.b, 1)
+  readonly property color cardFill: Qt.rgba(Commons.Color.popups.background.r, Commons.Color.popups.background.g, Commons.Color.popups.background.b, 1)
   readonly property color urgentFill: Qt.tint(cardFill, Util.alpha(accent, 0.14))
   // Card outlines, likewise opaque: the 18% foreground line pre-blended onto
   // the fill it borders. Folding tucks every card past the second into the
@@ -121,7 +122,7 @@ Item {
       anchors.margins: Style.space(3)
       color: "transparent"
       border.width: root.hasCursor && !root.dismissHasCursor ? 1 : 0
-      border.color: Color.accent
+      border.color: Commons.Color.accent
       radius: Math.min(Style.space(4), Style.cornerRadius)
     }
     MouseArea {

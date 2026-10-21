@@ -28,7 +28,11 @@ ListView {
       if (liveRows["entry:" + entries[i].key]) return true
     return false
   }
-  model: rowModel
+  // Detaching the model releases delegates even while the popup is unmapped.
+  property bool contentActive: true
+  // Rebuilding offscreen should not start entrance animations before mapping.
+  property bool animateChanges: true
+  model: contentActive ? rowModel : null
   ListModel { id: rowModel }
   onRowsChanged: reconcileRows()
   Component.onCompleted: reconcileRows()
@@ -53,7 +57,7 @@ ListView {
   }
 
   add: Transition {
-    enabled: root.model === rowModel && root.stackingGroup === ""
+    enabled: root.model === rowModel && root.stackingGroup === "" && root.animateChanges
     ParallelAnimation {
       NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 180; easing.type: Easing.OutCubic }
       NumberAnimation { property: "entranceOffset"; from: root.entranceDistance; to: 0; duration: 180; easing.type: Easing.OutCubic }
@@ -63,7 +67,7 @@ ListView {
   // Removal already closes space by animating delegate height. A second y
   // transition can leave Qt's visible range and content-size estimate stale.
   moveDisplaced: Transition {
-    enabled: root.model === rowModel
+    enabled: root.model === rowModel && root.animateChanges
     NumberAnimation { property: "y"; duration: 140; easing.type: Easing.OutCubic }
   }
 

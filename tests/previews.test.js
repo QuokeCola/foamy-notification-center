@@ -24,11 +24,11 @@ function fixture(t) {
       assert.equal(result.status, 0, result.stderr);
       return file;
     },
-    send(file = "") {
+    send(file = "", fields = {}) {
       const timestamp = Date.now();
       const key = `${timestamp}-${++id}`;
       fs.writeFileSync(path.join(source, `${key}.json`), JSON.stringify({
-        app: "Preview test", summary: key, timestamp, execArgv: file ? ["viewer", file] : [],
+        app: "Preview test", summary: key, timestamp, execArgv: file ? ["viewer", file] : [], ...fields,
       }));
       return key;
     },
@@ -158,11 +158,148 @@ test("the real watcher continues after rejecting an image", async t => {
       } catch { return false; }
     });
   });
-  const rejected = f.send(wide);
+  const rejected = f.send(wide, {appIcon:wide, image:wide});
   const next = f.send();
   await waitFor(() => output.includes(next));
   const row = f.entries().find(entry => entry.key === rejected);
   assert.equal(row.preview, "");
+  assert.equal(row.appIcon, "");
+  assert.equal(row.image, "");
   assert.match(errors, /preview_rejected/);
   assert.equal(child.exitCode, null);
+});
+
+function inspect(file, format = '%m %wx%h %n') {
+  const result = spawnSync('magick', ['identify', '-format', format, file.replace(/^file:\/\//, '')], {encoding:'utf8', timeout:5000});
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout;
+}
+
+function progressiveBomb(f) {
+  const file = f.image('progressive.jpg', '-size', '32x32', 'xc:blue', '-interlace', 'Plane');
+  const data = fs.readFileSync(file);
+  const frame = data.indexOf(Buffer.from([0xff, 0xc2]));
+  assert.ok(frame > 0, 'fixture must be a progressive JPEG');
+  // Large declared dimensions with tiny scan data exercise coefficient allocation.
+  data.writeUInt16BE(60000, frame + 5);
+  data.writeUInt16BE(60000, frame + 7);
+  fs.writeFileSync(file, data);
+  return file;
+}
+
+test('all file-backed image slots are normalized, including valid progressive JPEG icons', t => {
+  const f = fixture(t);
+  for (const extension of ['png', 'jpg', 'gif', 'webp', 'bmp', 'ico']) {
+    const size = extension === 'ico' ? '64x32' : '1440x900';
+    const file = f.image(`icon.${extension}`, '-size', size, 'xc:steelblue', ...(extension === 'jpg' ? ['-interlace', 'Plane'] : []));
+    f.send('', {appIcon:file, image:file});
+  }
+  f.send('', {appIcon:'org.gnome.Nautilus'});
+  f.run();
+  for (const row of f.entries().filter(row => row.appIcon.startsWith('file://'))) {
+    for (const slot of ['appIcon', 'image']) {
+      assert.match(row[slot], /\.png$/);
+      assert.match(inspect(row[slot]), /^PNG (720x450|64x32) 1$/);
+    }
+  }
+  assert.equal(f.entries().filter(row => row.appIcon.startsWith('file://')).length, 6);
+  assert.equal(f.entries().at(-1).appIcon, 'org.gnome.Nautilus');
+});
+
+test('transparent icons and self-contained SVG icons keep their pixels', t => {
+  const f = fixture(t);
+  const png = f.image('alpha.png', '-size', '32x32', 'xc:none', '-fill', '#00ff0080', '-draw', 'rectangle 0,0 15,15');
+  const svg = path.join(f.root, 'icon.svg');
+  fs.writeFileSync(svg, '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="16" height="16" fill="#00ff00" fill-opacity="0.5"/></svg>');
+  f.send('', {appIcon:png});f.send('', {appIcon:svg});f.run();
+  for (const row of f.entries()) {
+    assert.equal(inspect(row.appIcon), 'PNG 32x32 1');
+    assert.equal(inspect(row.appIcon, '%[fx:p{31,31}.a]'), '0');
+    assert.ok(Math.abs(Number(inspect(row.appIcon, '%[fx:p{0,0}.a]')) - 0.5) < 0.01);
+  }
+});
+
+test('SVG icons cannot include neighbouring or absolute external files', t => {
+  const f = fixture(t);
+  const secret = f.image('private.png', '-size', '32x32', 'xc:red');
+  for (const href of ['private.png', `file://${secret}`, secret]) {
+    const svg = path.join(f.root, 'linked.svg');
+    fs.writeFileSync(svg, `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="32" height="32"><rect width="32" height="32" fill="blue"/><image xlink:href="${href}" width="32" height="32"/></svg>`);
+    f.send('', {appIcon:svg});f.run();
+    const icon = f.entries().at(-1).appIcon;
+    assert.ok(icon, 'normal SVG content should still render');
+    assert.equal(inspect(icon, '%[fx:p{0,0}.r] %[fx:p{0,0}.b]'), '0 1');
+  }
+});
+
+test('progressive JPEG bombs and corrupt icons are rejected without losing notification text', t => {
+  const f = fixture(t);
+  const bomb = progressiveBomb(f);
+  const corrupt = f.image('bad.png', '-size', '1x1', 'xc:red');fs.truncateSync(corrupt, 40);
+  for (const file of [bomb, corrupt]) f.send('', {appIcon:file, image:file});
+  f.send('', {appIcon:'safe-theme-icon'});
+  const start = Date.now(), result = f.run();
+  assert.ok(Date.now() - start < 10000);
+  assert.match(result.stderr, /appIcon_rejected/);
+  assert.match(result.stderr, /image_rejected/);
+  assert.equal(f.entries().length, 3);
+  for (const row of f.entries().slice(0,2)) {assert.equal(row.appIcon,'');assert.equal(row.image,'');assert.ok(row.summary);}
+  assert.deepEqual(fs.readdirSync(path.join(f.store,'images')), []);
+});
+
+test('first list migrates retained legacy images before exposing them, without their sources', t => {
+  const f = fixture(t);
+  f.run('list');
+  const timestamp = Date.now(), key = `${timestamp}-41`;
+  const original = f.image('old-icon.jpg', '-size', '1200x900', 'xc:green', '-interlace', 'Plane');
+  const legacy = path.join(f.store, 'images', `${key}-appIcon`);
+  fs.copyFileSync(original, legacy);fs.unlinkSync(original);
+  const row = {key,timestamp,app:'Old app',summary:'Retained notification',appIcon:`file://${legacy}`,image:`file://${legacy}`,preview:'',file:'/tmp/original-picture.jpg',sourceHash:'old',assetsHash:'old'};
+  fs.writeFileSync(path.join(f.store, 'archive.jsonl'), JSON.stringify(row)+'\n');
+  const result = JSON.parse(f.run('list').stdout)[0];
+  assert.equal(result.summary, row.summary);assert.equal(result.file,row.file);
+  for (const slot of ['appIcon','image']) assert.equal(inspect(result[slot]),'PNG 720x540 1');
+  assert.equal(result.imageFormat,1);assert.equal(fs.existsSync(legacy),false);
+  const before=fs.statSync(result.appIcon.slice(7),{bigint:true}).mtimeNs;
+  f.run('list');f.run();assert.equal(fs.statSync(result.appIcon.slice(7),{bigint:true}).mtimeNs,before);
+});
+
+test('legacy rejected images and provider URLs never escape through list', t => {
+  const f = fixture(t);f.run('list');
+  const bomb=progressiveBomb(f),timestamp=Date.now();
+  const rows=[{key:`${timestamp}-1`,timestamp,summary:'Bomb',appIcon:`file://${bomb}`},
+    {key:`${timestamp}-2`,timestamp,summary:'Provider',appIcon:'image://icon//tmp/raw.jpg',image:'image://pixmap/1'}];
+  fs.writeFileSync(path.join(f.store,'archive.jsonl'),rows.map(JSON.stringify).join('\n')+'\n');
+  const result=JSON.parse(f.run('list').stdout);
+  assert.equal(result.length,2);
+  assert.ok(result.every(row=>row.appIcon==='' && row.image===''));
+  assert.ok(fs.existsSync(bomb), 'migration must not delete sender files');
+});
+
+test('decoder memory allocations outside its pixel cache remain bounded for app icons', t => {
+  const f=fixture(t), image=f.image('valid.png','-size','1x1','xc:red');
+  // A worker allocation bypasses ImageMagick settings but must hit RLIMIT_AS.
+  f.mockMagick("exec /usr/bin/python3 -c 'x = bytearray(600 * 1024 * 1024)' ");
+  f.send('',{appIcon:image});
+  const result=f.run();
+  assert.match(result.stderr,/appIcon_rejected/);
+  assert.equal(f.entries()[0].appIcon,'');
+  assert.deepEqual(fs.readdirSync(path.join(f.store,'images')),[]);
+});
+
+test('concurrent first loads migrate once and retain valid images after source cleanup', async t => {
+  const f=fixture(t);f.run('list');
+  const timestamp=Date.now(),key=`${timestamp}-44`;
+  const image=f.image('legacy.jpg','-size','128x64','xc:red','-interlace','Plane');
+  fs.writeFileSync(path.join(f.store,'archive.jsonl'),JSON.stringify({key,timestamp,summary:'Keep',appIcon:image})+'\n');
+  function list() {
+    return new Promise((resolve,reject)=>{
+      const child=spawn(script,['list'],{env:f.env});let output='',errors='';
+      child.stdout.on('data',data=>output+=data);child.stderr.on('data',data=>errors+=data);
+      child.on('error',reject);child.on('exit',code=>{if(code!==0)reject(new Error(errors));else resolve(JSON.parse(output));});
+    });
+  }
+  const [a,b]=await Promise.all([list(),list()]);assert.deepEqual(a,b);
+  assert.equal(inspect(a[0].appIcon),'PNG 128x64 1');
+  assert.equal(f.entries().length,1);
 });
